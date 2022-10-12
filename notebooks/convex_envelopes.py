@@ -208,7 +208,7 @@ pred_Y = pred_cK.T @ npr.randn(knot_N, num_pred) + pred_mean[:,np.newaxis]
 
 # ## Slice sampling 
 # 
-# TODO: integrate thi
+# TODO: integrate this into the above code and jit things
 
 # In[14]:
 
