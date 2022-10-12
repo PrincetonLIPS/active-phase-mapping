@@ -153,7 +153,7 @@ p_tight = np.clip(np.mean(tights, axis=0), 1e-6, 1-1e-6)
 # Marginal bits
 cur_entropy = -np.sum( p_tight*np.log2(p_tight) + (1-p_tight)*np.log2(1-p_tight))
 
-# Do this with slow loops to start out. ### TODO: what is this??
+# Do this with slow loops to start out. ### TODO: modify this
 entropy_change = []
 for nn in tqdm.tqdm(range(knot_N)):
   mean = pred_mean[nn]
@@ -198,6 +198,107 @@ pred_mean, pred_cov = make_preds(train_x, train_y, knot_x)
 
 pred_cK = spla.cholesky(pred_cov)
 pred_Y = pred_cK.T @ npr.randn(knot_N, num_pred) + pred_mean[:,np.newaxis]
+
+
+# In[ ]:
+
+
+
+
+
+# ## Slice sampling 
+# 
+# TODO: integrate thi
+
+# In[14]:
+
+
+# Legendre-Fenchel Transform
+
+# What range do we need to think about?
+# Let's do 3 sigma.
+deriv_marg_var = np.max(np.diag(d_kernel(knot_x, knot_x, ls)))
+s = np.linspace(-3*np.sqrt(deriv_marg_var), 3*np.sqrt(deriv_marg_var), 500)
+
+@jax.jit
+def convelope(knot_x, knot_y):
+  knot_y = np.atleast_2d(knot_y) # samples x num_primal
+  sx = s[:,np.newaxis] * knot_x[np.newaxis,:] # num_dual x num_primal
+  
+  lft1 = np.max(sx[np.newaxis,:,:] - knot_y[:,np.newaxis,:],  axis=2) # samples x num_dual
+
+  lft2 = np.max(sx[np.newaxis,:,:] - lft1[:,:,np.newaxis],  axis=1) # samples x num_primal
+  return lft2
+
+hull = convelope(knot_x, knot_y).ravel()
+
+plt.figure(figsize=(10,10))
+plt.plot(knot_x,  knot_y, knot_x, hull)
+
+
+# In[15]:
+
+
+tight = knot_y - hull < 1e-3
+def same_tight(y, tight):
+  new_hull = convelope(knot_x, y).ravel()
+  new_tight = y - new_hull < 1e-3
+  return np.all(tight == new_tight)
+
+def var2entropy(v):
+  return 0.5*np.log(2*np.pi*v) + 0.5
+
+def make_preds(train_x, train_y, test_x):
+  # Compute the training kernels.
+  train_K = kernel(train_x, train_x, ls) + 1e-6*np.eye(train_x.shape[0])
+  cross_K = kernel(train_x, test_x, ls)
+  kappa_K = kernel(test_x, test_x, ls)
+
+  # Predictive parameters.
+  train_cK = spla.cholesky(train_K)
+  cross_solve = spla.cho_solve((train_cK,  False), cross_K)
+  pred_mean = train_y.T @ cross_solve
+  pred_cov  = kappa_K - cross_K.T @ cross_solve + 1e-6*np.eye(knot_N)
+
+  return pred_mean, pred_cov
+
+
+# In[16]:
+
+
+# Rewrite this in jax.
+def elliptical_slice(x0, log_lh_func, cK, num_steps):
+  D = x0.shape[0]
+  samples = []
+  x = x0
+  for ii in tqdm.tqdm(range(num_steps)):
+    nu = cK.T @ npr.randn(D)
+    u = npr.rand()
+    log_y = log_lh_func(x) + np.log(u)
+    theta = npr.rand() * 2 * np.pi
+    upper = theta
+    lower = theta - 2 * np.pi
+    shrinks = 0
+    while True:
+      theta = npr.rand()*(upper-lower) + lower
+      new_x = x * np.cos(theta) + nu * np.sin(theta)
+      if log_lh_func(new_x) > log_y:
+        x = new_x
+        break
+      else:
+        shrinks = shrinks + 1
+        if theta > 0:
+          upper = theta
+        else:
+          lower = theta
+    if ii % 100 == 0:
+      print(ii, shrinks, theta)
+    samples.append(x)
+  return np.array(samples)
+samples = elliptical_slice(knot_y, lambda x: np.log(same_tight(x, tight)), knot_cK, 300)
+plt.figure(figsize=(10,10))
+plt.plot(knot_x, samples.T, knot_x, hull, 'k-')
+plt.show()
 
 
 # In[ ]:
