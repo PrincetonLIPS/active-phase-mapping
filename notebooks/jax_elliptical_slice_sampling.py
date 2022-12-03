@@ -1,17 +1,23 @@
-#!/usr/bin/env python
-# coding: utf-8
-
-# In[1]:
-
-
 import jax
 import jax.numpy  as jnp
 import jax.random as jrnd
 import matplotlib.pyplot as plt
 
+def while_loop(cond_fun, body_fun, init_val):
+  val = init_val
+  while cond_fun(val):
+    val = body_fun(val)
+  return val
 
-# In[2]:
-
+def scan(f, init, xs, length=None):
+  if xs is None:
+    xs = [None] * length
+  carry = init
+  ys = []
+  for x in xs:
+    carry, y = f(carry, x)
+    ys.append(y)
+  return carry, jnp.stack(ys)
 
 def elliptical_slice(x0, log_lh_func, chol, num_samples, rng_key):
 
@@ -33,13 +39,20 @@ def elliptical_slice(x0, log_lh_func, chol, num_samples, rng_key):
   @jax.jit
   def ess_step(x, rng_key):
     nu_rng, u_rng, theta_rng, rng_key = jrnd.split(rng_key, 4)
-    nu = jrnd.normal(nu_rng, shape=x.shape)
+
+    # Determine slice height.
     u = jrnd.uniform(u_rng)
     thresh = log_lh_func(x) + jnp.log(u)
+
+    # Get initial bracket.
     theta = jrnd.uniform(theta_rng, minval=0, maxval=2*jnp.pi)
     upper = theta
     lower = theta - 2*jnp.pi
+
+    # Construct ellipse.
+    nu = chol @ jrnd.normal(nu_rng, shape=x.shape)
     new_x = x*jnp.cos(theta) + nu*jnp.sin(theta)
+
     _, new_x, _, _, _, _, _ = jax.lax.while_loop(
       ess_step_condfun,
       ess_step_bodyfun,
@@ -58,21 +71,18 @@ def elliptical_slice(x0, log_lh_func, chol, num_samples, rng_key):
 
   return samples
 
-
-# In[3]:
-
-
 rng_key = jrnd.PRNGKey(1)
 
+S = jnp.array([
+  [1.0, -1.2],
+  [-1.2, 2.0],
+])
+import numpy.linalg as npla
+cS = npla.cholesky(S)
 
-# In[4]:
-
-
-elliptical_slice(jnp.ones(3), lambda x: jnp.log(jnp.all(x>0)), jnp.eye(3), 50, rng_key)
-
-
-# In[ ]:
-
-
-
-
+samples = elliptical_slice(jnp.ones(2), lambda x: jnp.where(x[0]>0, 0, -jnp.inf), cS, 50000, rng_key)
+print(jnp.mean(samples, axis=0))
+print(jnp.cov(samples.T))
+plt.plot(samples[:,0], samples[:,1], '.')
+plt.gca().set_aspect('equal')
+plt.show()
