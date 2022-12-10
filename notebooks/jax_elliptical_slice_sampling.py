@@ -50,7 +50,7 @@ def elliptical_slice(x0, log_lh_func, chol, num_samples, rng_key):
     lower = theta - 2*jnp.pi
 
     # Construct ellipse.
-    nu = chol @ jrnd.normal(nu_rng, shape=x.shape)
+    nu = chol.T @ jrnd.normal(nu_rng, shape=x.shape)
     new_x = x*jnp.cos(theta) + nu*jnp.sin(theta)
 
     _, new_x, _, _, _, _, _ = jax.lax.while_loop(
