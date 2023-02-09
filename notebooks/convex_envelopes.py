@@ -524,12 +524,12 @@ plt.plot(knot_x, samps.T[:,-100:-1], knot_x, hull, 'k-')
 plt.show()
 
 
-# In[27]:
+# In[190]:
 
 
 # jax ESS 
 rng_key = jrnd.PRNGKey(1)
-samps2 = elliptical_slice_jax(knot_y, lambda x: np.log(same_tight(x, tight)), knot_cK, 300, rng_key)
+get_ipython().run_line_magic('timeit', 'elliptical_slice_jax(knot_y, lambda x: np.log(same_tight(x, tight)), knot_cK, 300, rng_key)')
 
 
 # In[28]:
@@ -553,9 +553,10 @@ plt.show()
 
 
 
-# In[29]:
+# In[94]:
 
 
+## TODO: jaxify
 def make_pred_single(train_x, train_y, test_x):
     # Compute the training kernels.
     train_K = kernel(train_x, train_x, ls) + 1e-6*np.eye(train_x.shape[0])
@@ -574,13 +575,13 @@ def make_pred_single(train_x, train_y, test_x):
 # In[30]:
 
 
-def compute_log_scond_pred_term(samp_f, putative_x, y_star):
-    """
-    knot_y is y^*
-    """
-    # compute a single term
-    test_mu, test_Sigma = make_pred_single(knot_x, samp_f, putative_x)
-    return norm.pdf(test_mu, test_Sigma, y_star)  
+#def compute_log_scond_pred_term(samp_f, putative_x, y_star):
+#    """
+#    knot_y is y^*
+#    """
+#    # compute a single term
+#    test_mu, test_Sigma = make_pred_single(knot_x, samp_f, putative_x)
+#    return norm.pdf(test_mu, test_Sigma, y_star)  
 
 def sample_log_scond_pred_term(samp_f, putative_x):
     """
@@ -591,10 +592,80 @@ def sample_log_scond_pred_term(samp_f, putative_x):
     return npr.normal(test_mu, test_Sigma)
 
 
-# In[86]:
+# In[143]:
 
 
-def estimate_entropy_cond_s(samps, putative_x, s, J=50):
+
+
+
+# In[160]:
+
+
+make_pred_single_wrap = lambda arg: make_pred_single(knot_x, arg, putative_x) ## TODO knot_x is global var here
+makepred_vmap = jax.jit(jax.vmap(make_pred_single_wrap, in_axes=(0,)))
+mus, sigmas = makepred_vmap(samps)
+
+
+# In[192]:
+
+
+mus, sigmas = makepred_vmap(samps)
+ystars = jrnd.multivariate_normal(rng_key, mus, np.eye(sigmas.shape[0])*sigmas)
+
+
+# In[193]:
+
+
+ystars
+
+
+# In[97]:
+
+
+norm.pdf(test_mu, test_Sigma, 0.1)  
+
+
+# In[123]:
+
+
+npr.normal(np.zeros(4), np.eye(4))
+
+
+# In[100]:
+
+
+sample_log_scond_pred_term(samps[1], putative_x)
+
+
+# In[170]:
+
+
+ystars
+
+
+# In[103]:
+
+
+def pred_sample_wrap(sample):
+     return sample_log_scond_pred_term(sample, putative_x)
+
+
+# In[108]:
+
+
+samps.shape
+
+
+# In[158]:
+
+
+pred_sample_vmap = jax.jit(jax.vmap(pred_sample_wrap, in_axes=(0,)))
+
+
+# In[194]:
+
+
+def estimate_entropy_cond_s(samps, putative_x, s, rng_key, J=50):
     """
     samps: samples of f's from ellipitical slice sampling
     s: binary vector of tights
@@ -603,12 +674,20 @@ def estimate_entropy_cond_s(samps, putative_x, s, J=50):
     test_samps = samps[totsamps-J:totsamps]
     
     # get 1d predictive y samples
-    ystars = np.array([sample_log_scond_pred_term(ts, putative_x) for ts in test_samps])
+    ## TODO: vectorize this loop
+    #ystars = np.array([sample_log_scond_pred_term(ts, putative_x) for ts in test_samps])
+    
+    make_pred_single_wrap = lambda arg: make_pred_single(knot_x, arg, putative_x) ## TODO knot_x is global var here
+    makepred_vmap = jax.jit(jax.vmap(make_pred_single_wrap, in_axes=(0,)))
+    mus, sigmas = makepred_vmap(test_samps)
+    ystars = jrnd.multivariate_normal(rng_key, mus, np.eye(sigmas.shape[0])*sigmas) # TODO: just rescale by cholesky + mean
+    #rnd.multivariate_normal(rng_key, mus, np.eye(sigmas.shape[0])*sigmas)
+    
     # compute a KDE estimator of density p(y | s, data, putative_x)
     ypred_kde = gaussian_kde(ystars, bw_method='scott', weights=None)
     
     # evaluate the log probability on the samples y^{(j)}
-    return ypred_kde.logpdf(ystars).mean()
+    return ypred_kde.logpdf(ystars).mean() # inner MC estimate
 
 def ess_and_estimate_entropy(putative_x, s, y, cK, rng_key, J=50):
     """
@@ -618,7 +697,7 @@ def ess_and_estimate_entropy(putative_x, s, y, cK, rng_key, J=50):
     ## TODO: get rid of knot_cK?
     # sample J*3 number of points but only keep the last J 
     samps_f = elliptical_slice_jax(y.ravel(), lambda x: np.log(same_tight(x, s)), cK, J*3, rng_key)
-    return estimate_entropy_cond_s(samps_f, putative_x, s, J)
+    return estimate_entropy_cond_s(samps_f, putative_x, s, rng_key, J)
 
 
 # In[32]:
@@ -627,38 +706,32 @@ def ess_and_estimate_entropy(putative_x, s, y, cK, rng_key, J=50):
 ystars = np.array([sample_log_scond_pred_term(ts, knot_x[1]) for ts in samps[100:]])
 
 
-# In[33]:
+# In[197]:
 
 
-estimate_entropy_cond_s(samps, knot_x[1], tight, J=50)
+get_ipython().run_line_magic('timeit', 'estimate_entropy_cond_s(samps, knot_x[1], tight, rng_key, J=50)')
 
 
-# In[34]:
+# In[171]:
 
 
 ypred_kde = gaussian_kde(ystars, bw_method='scott', weights=None)
 
 
-# In[35]:
+# In[172]:
 
 
 xx = np.linspace(-1,1,200)
 plt.plot(xx, [ypred_kde.pdf(x) for x in xx])
 
 
-# In[47]:
+# In[198]:
 
 
 putative_x = knot_x[3]
 
 # we need to average over many samples of tights to get the final answer
-ess_and_estimate_entropy(putative_x, tight, knot_y, knot_cK, J=50)
-
-
-# In[48]:
-
-
-knot_y
+get_ipython().run_line_magic('time', 'ess_and_estimate_entropy(putative_x, tight, knot_y, knot_cK, rng_key, J=50)')
 
 
 # # Redoing the IG computation
