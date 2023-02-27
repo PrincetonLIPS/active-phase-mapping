@@ -1,3 +1,14 @@
+import jax
+import jax.numpy as jnp 
+import jax.random as jrnd
+import jax.scipy.stats as jsps
+import jax.scipy.linalg as spla
+from jax.config import config
+config.update("jax_enable_x64", True)
+
+import numpy.random as npr 
+
+
 # Non GPjax code
 def kernel_rbf(x1, x2):
     """
