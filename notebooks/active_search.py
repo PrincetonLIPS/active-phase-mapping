@@ -24,7 +24,8 @@ def get_next_candidate_baseline(posterior, params, dataset, designs, design_spac
     Baseline active search method based on selecting designs with maximum posterior variance.
     """
     # get covariances and compute log determinant
-    covariances = jnp.array([make_preds(dataset, posterior, params, x)[1] for x in designs])
+    covariances = jnp.array([make_preds(dataset, posterior, params, jnp.atleast_2d(x))[1] for x in designs])
+    
     entropy_change = 0.5 * jnp.linalg.slogdet(covariances + 1)[1]
     return designs[entropy_change.argmax()], entropy_change
 
