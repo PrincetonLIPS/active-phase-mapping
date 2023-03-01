@@ -6,7 +6,7 @@ from gp_model import make_preds
 import ternary
 
 
-def plot_candidate(knot_x, true_y, true_envelope, pred_mean, pred_cov, envelopes, dataset, next_x, scores, plot_eig=True, legend=True, plot_hulls=True):
+def plot_candidate(knot_x, true_y, true_envelope, pred_mean, pred_cov, envelopes, dataset, next_x, scores, plot_eig=True, legend=True, plot_hulls=True, designs=None):
     """
     Plotting utilities for the 1D example.
     """
@@ -30,7 +30,8 @@ def plot_candidate(knot_x, true_y, true_envelope, pred_mean, pred_cov, envelopes
 
     # Plot the entropy estimates (i.e., -second term of EIG)
     if plot_eig:
-        plt.scatter(knot_x, scores, c="purple", marker="|", label="EIG")
+        if designs is not None:
+            plt.scatter(designs, scores, c="purple", marker="|", label="EIG")
         
     if legend:
         plt.legend(ncol=2)
@@ -95,7 +96,7 @@ def plot_std(posterior, dataset, params, pts, next_x=None, scale=10, tight_pts=N
         return float(std)
 
     if plot_title:
-        tax.set_title("Posterior standard deviation and candidate design", fontsize=10)
+        tax.set_title("Posterior SD", fontsize=12, loc="right")
     tax.boundary(linewidth=2.0)
     #tax.gridlines(multiple=n_grid, color="blue")
 
@@ -141,4 +142,54 @@ def plot_std(posterior, dataset, params, pts, next_x=None, scale=10, tight_pts=N
     tax.get_axes().axis('off')
 
     tax.show()
+
     
+def plot_distances(pts, true_y, true_envelope, next_x=None, scale=10, tight_pts=None, plot_design=False, plot_title=False):
+    
+    """
+    Scale: how finely to visualize the standard deviation.
+    """
+    
+    figure, ax = plt.subplots(figsize=(8, 5)); fontsize = 20
+    tax = ternary.TernaryAxesSubplot(ax=ax, scale=scale)
+    cmap = plt.cm.Blues.reversed()
+   
+    if plot_title:
+        tax.set_title("Distances to hull", fontsize=12, loc="right")
+    tax.boundary(linewidth=2.0)
+    #tax.gridlines(multiple=n_grid, color="blue")
+
+    if tight_pts != None:
+        tax.scatter(jnp.array(tight_pts) * scale, marker="o", label="Tight points",
+                    s=250, zorder=6, edgecolors="tab:purple", 
+                    linewidth=2.0, alpha=1, facecolors="none")
+        
+    # plot observed data
+    x_train_pts = []
+    for x in dataset.X:
+        x_train_pts.append((x[0] * scale, x[1] * scale, (1-x.sum()) * scale))
+    tax.scatter(x_train_pts, marker=".", label="Observation", s=250, zorder=5, color="k", alpha=1)
+
+    if plot_design:
+        tax.scatter(jnp.array(pts) * scale, marker=".", label="Design space",  s=150, color="gray", zorder=3)
+    
+    # plot distances
+    dists_to_hull = jnp.abs(true_y - true_envelope)
+    tax.scatter(jnp.array(pts) * scale, cmap=cmap, colormap=cmap,
+            vmin=dists_to_hull.min(), vmax=dists_to_hull.max(), c=dists_to_hull, colorbar=True, s=200, edgecolors="k")
+    
+    # plot candidate design
+    if next_x != None:
+        #print(pts[next_x])
+        tax.scatter([jnp.array(pts[next_x]) * scale], marker="*", label="Candidate design", 
+                    s=200, zorder=6, color="tab:red", edgecolors="k")
+
+    
+    tax.clear_matplotlib_ticks()
+    tax.legend(loc="upper right")
+    tax.right_corner_label("B", fontsize=fontsize)
+    tax.top_corner_label("A", fontsize=fontsize)
+    tax.left_corner_label("C", fontsize=fontsize)
+    tax.get_axes().axis('off')
+
+    tax.show()
