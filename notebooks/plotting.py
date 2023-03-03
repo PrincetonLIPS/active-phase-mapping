@@ -88,6 +88,8 @@ def plot_std(posterior, dataset, params, pts, next_x=None, scale=10, tight_pts=N
     
     figure, ax = plt.subplots(figsize=(8, 5)); fontsize = 20
     tax = ternary.TernaryAxesSubplot(ax=ax, scale=scale)
+    
+    cmap = plt.cm.magma #.reversed()
 
     def get_std(x):  
         test_x = jnp.array(x[0:2])
@@ -109,7 +111,7 @@ def plot_std(posterior, dataset, params, pts, next_x=None, scale=10, tight_pts=N
     x_train_pts = []
     for x in dataset.X:
         x_train_pts.append((x[0] * scale, x[1] * scale, (1-x.sum()) * scale))
-    tax.scatter(x_train_pts, marker=".", label="Observation", s=250, zorder=5, color="k")
+    tax.scatter(x_train_pts, marker=".", label="Observation", s=200, zorder=5, color="k")
 
     if plot_design:
         tax.scatter(jnp.array(pts) * scale, marker=".", label="Design space",  s=150, color="gray", zorder=3)
@@ -122,8 +124,8 @@ def plot_std(posterior, dataset, params, pts, next_x=None, scale=10, tight_pts=N
     if heatmapf:
         tax.heatmapf(get_std, style="t", cmap=plt.cm.magma)
     else:
-        tax.scatter(jnp.array(pts) * scale, cmap=plt.cm.magma, colormap=plt.cm.magma,
-            vmin=0, vmax=1, c=stds, colorbar=True, s=200, edgecolors="k")
+        tax.scatter(jnp.array(pts) * scale, cmap=cmap, colormap=cmap,
+            vmin=0, vmax=jnp.array(stds).max(), c=stds, colorbar=True, s=200, edgecolors="k")
         
         #print(pts[next_x][0:2], stds[next_x])
     
@@ -136,15 +138,15 @@ def plot_std(posterior, dataset, params, pts, next_x=None, scale=10, tight_pts=N
     
     tax.clear_matplotlib_ticks()
     tax.legend(loc="upper right")
-    tax.right_corner_label("B", fontsize=fontsize)
-    tax.top_corner_label("A", fontsize=fontsize)
+    tax.right_corner_label("A", fontsize=fontsize)
+    tax.top_corner_label("B", fontsize=fontsize)
     tax.left_corner_label("C", fontsize=fontsize)
     tax.get_axes().axis('off')
 
     tax.show()
 
     
-def plot_distances(pts, true_y, true_envelope, next_x=None, scale=10, tight_pts=None, plot_design=False, plot_title=False):
+def plot_distances(pts, true_y, true_envelope, dataset, next_x=None, scale=10, tight_pts=None, plot_design=False, plot_title=False, names=None):
     
     """
     Scale: how finely to visualize the standard deviation.
@@ -152,8 +154,9 @@ def plot_distances(pts, true_y, true_envelope, next_x=None, scale=10, tight_pts=
     
     figure, ax = plt.subplots(figsize=(8, 5)); fontsize = 20
     tax = ternary.TernaryAxesSubplot(ax=ax, scale=scale)
-    cmap = plt.cm.Blues.reversed()
-   
+    cmap = plt.cm.Blues
+    #cmap = plt.cm.Blues.reversed()
+    
     if plot_title:
         tax.set_title("Distances to hull", fontsize=12, loc="right")
     tax.boundary(linewidth=2.0)
@@ -161,7 +164,7 @@ def plot_distances(pts, true_y, true_envelope, next_x=None, scale=10, tight_pts=
 
     if tight_pts != None:
         tax.scatter(jnp.array(tight_pts) * scale, marker="o", label="Tight points",
-                    s=250, zorder=6, edgecolors="tab:purple", 
+                    sizes=jnp.ones(len(pts))*200, zorder=6, edgecolors="tab:purple", 
                     linewidth=2.0, alpha=1, facecolors="none")
         
     # plot observed data
@@ -187,9 +190,16 @@ def plot_distances(pts, true_y, true_envelope, next_x=None, scale=10, tight_pts=
     
     tax.clear_matplotlib_ticks()
     tax.legend(loc="upper right")
-    tax.right_corner_label("B", fontsize=fontsize)
-    tax.top_corner_label("A", fontsize=fontsize)
-    tax.left_corner_label("C", fontsize=fontsize)
+    
+    if names == None:
+        tax.right_corner_label("A", fontsize=fontsize)
+        tax.top_corner_label("B", fontsize=fontsize)
+        tax.left_corner_label("C", fontsize=fontsize)
+    else:
+        tax.right_corner_label(names[0], fontsize=fontsize)
+        tax.top_corner_label(names[1], fontsize=fontsize)
+        tax.left_corner_label(names[2], fontsize=fontsize)
+    
     tax.get_axes().axis('off')
 
     tax.show()
