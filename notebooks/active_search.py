@@ -109,6 +109,10 @@ def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, param
     samps = elliptical_slice_jax(y.ravel(), lambda x: jnp.log(same_tight(x, s)), cK, totsamps, rng_key)
     test_samps = samps[totsamps-J:totsamps]
     
+    x_ind = (putative_x == design_space).argmax()
+    ystars = test_samps[:, x_ind]
+    
+    """
     # get 1d predictive y samples at values of the full design space
     def make_pred_single(train_y):
         data_values = Dataset(X = design_space, y = train_y[:, jnp.newaxis])
@@ -119,6 +123,7 @@ def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, param
     # get predictive means and variances and samples according to these parameters
     mus, sigmas = makepred_vmap(test_samps)
     ystars = jrnd.multivariate_normal(rng_key, mus, jnp.eye(len(mus))*sigmas) # TODO: just rescale by cholesky + mean
+    """
     
     # compute a KDE estimator of density p(y | s, data, putative_x)
     ypred_kde = jsps.gaussian_kde(ystars, bw_method='scott', weights=None)
