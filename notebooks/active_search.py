@@ -100,8 +100,12 @@ def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, param
     """
     # sample J*3 number of points but only keep the last J 
     def same_tight(y, tight):
-        new_hull = convelope(design_space, y).ravel()
-        new_tight = y - new_hull < 1e-3
+        #new_hull = convelope(design_space, y).ravel()
+        #new_tight = y - new_hull < 1e-3
+        points = np.hstack([design_space, y[:, np.newaxis]])
+        hull = ConvexHull(points)
+        new_tight = np.zeros(len(design_space))
+        new_tight[hull.vertices] = 1
         return jnp.all(tight == new_tight)
 
     # samples of f given tights
