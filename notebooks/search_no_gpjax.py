@@ -8,13 +8,14 @@ config.update("jax_enable_x64", True)
 
 import numpy.random as npr 
 
+ls_default = 0.05
 
 # Non GPjax code
 def kernel_rbf(x1, x2):
     """
     Squared expoential kernel with lengthscale ls. 
     """
-    ls=0.1; v=1
+    ls=ls_default; v=1
     #ls = params["lengthscale"]; v = params["variance"]
     return v * jnp.exp(-0.5 * jnp.linalg.norm(x1-x2) ** 2 / ls ** 2)
 

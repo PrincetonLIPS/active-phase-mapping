@@ -10,6 +10,7 @@ import jaxkern as jk
 import optax as ox
 from jaxutils import Dataset
 
+ls_default = 0.05
 
 def make_preds(dataset, posterior, params, test_x, verbose=False):
 
@@ -42,7 +43,7 @@ def update_model(dataset, design_space, rng_key, update_params=False, num_iters=
         # Use default parameters
         if init_params is None:
             parameter_state = gpx.initialise(posterior, key=rng_key, 
-                                         kernel={"lengthscale": jnp.array([0.1]), "variance": jnp.array([1])},
+                                         kernel={"lengthscale": jnp.array([ls_default]), "variance": jnp.array([1])},
                                         likelihood={'obs_noise': jnp.array([0])})
         else:
             pass # TODO: make it possible to pass in initial parameters for the kernel

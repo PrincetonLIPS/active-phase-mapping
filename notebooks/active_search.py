@@ -100,12 +100,12 @@ def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, param
     """
     # sample J*3 number of points but only keep the last J 
     def same_tight(y, tight):
-        #new_hull = convelope(design_space, y).ravel()
-        #new_tight = y - new_hull < 1e-3
-        points = np.hstack([design_space, y[:, np.newaxis]])
-        hull = ConvexHull(points)
-        new_tight = np.zeros(len(design_space))
-        new_tight[hull.vertices] = 1
+        new_hull = convelope(design_space, y).ravel()
+        new_tight = y - new_hull < 1e-3
+        #points = np.hstack([design_space, y[:, np.newaxis]])
+        #hull = ConvexHull(points)
+        #new_tight = np.zeros(len(design_space))
+        #new_tight[hull.vertices] = 1
         return jnp.all(tight == new_tight)
 
     # samples of f given tights
@@ -143,8 +143,8 @@ def convelope(design_space, knot_y):
     d_kernel = jax.jit(jax.vmap(jax.grad(jax.grad(lambda x1, x2, ls: kernel_old(x1, x2, ls)[0,0], argnums=0), argnums=1), in_axes=(0,0,None)))
     # TODO: 
     #deriv_marg_var = np.max(jnp.diag(d_kernel(knot_x, knot_x, ls)))
-    deriv_marg_var = 100
-    s = jnp.linspace(-3*jnp.sqrt(deriv_marg_var), 3*jnp.sqrt(deriv_marg_var), 500)
+    deriv_marg_var = 50 #100
+    s = jnp.linspace(-3*jnp.sqrt(deriv_marg_var), 3*jnp.sqrt(deriv_marg_var), 200)
     ss = jnp.meshgrid(*[s.ravel()]*D)
     s = jnp.array([sx.flatten() for sx in ss]).T
     knot_y = jnp.atleast_2d(knot_y) # samples x num_primal
