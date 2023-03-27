@@ -99,13 +99,21 @@ def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, param
         these samples, and then estimate the entropy.
     """
     # sample J*3 number of points but only keep the last J 
-    def same_tight(y, tight):
+    def same_tight_1d(y, tight):
         new_hull = convelope(design_space, y).ravel()
         new_tight = y - new_hull < 1e-3
         #points = np.hstack([design_space, y[:, np.newaxis]])
         #hull = ConvexHull(points)
         #new_tight = np.zeros(len(design_space))
         #new_tight[hull.vertices] = 1
+        return jnp.all(tight == new_tight)
+    
+    def same_tight(y_val, tight):
+        #new_hull = convelope(design_space, y).ravel()
+        #new_hull = is_tight(design_space, y)
+        #new_tight = y - new_hull < 1e-3
+        #print(y_val)
+        new_tight = is_tight(design_space, y_val)[jnp.newaxis, :]
         return jnp.all(tight == new_tight)
 
     # samples of f given tights
@@ -159,3 +167,62 @@ def convelope(design_space, knot_y):
 
 
 
+from scipy.spatial import ConvexHull
+import numpy as np
+
+def convex_envelope(x, fs):
+    ## TODO: make this more efficient
+    """Computes convex envelopes of M functions which share a common grid.
+    x is an (N, D)-matrix corresponding to the grid in D-dimensional space and fs is an (M, N)-matrix.
+    The i-th function is given by the pairs (x[0], fs[i, 0]), ..., (x[N-1], fs[i, N-1]).
+    The envelopes are returned as a list of lists.
+    The i-th list is of the form [j_1, j_2, ..., j_n] where (X[j_k], fs[i, j_k]) is a point in the envelope.
+    
+    Keyword arguments:
+    x  -- A shape=(N,D) numpy array.
+    fs -- A shape=(M,N) or shape=(N,) numpy array."""
+    
+    #assert(len(fs.shape) <= 2)
+    if len(fs.shape) == 1: fs = np.reshape(fs, (-1, fs.shape[0]))
+    M, N = fs.shape
+    
+    #assert(len(x.shape) <= 2)
+    #if len(x.shape) == 1: x = np.reshape(x, (-1, 1))
+    #assert(x.shape[0] == N)
+    D = x.shape[1]
+    
+    fs_pad = np.empty((M, N+2))
+    fs_pad[:, 1:-1], fs_pad[:, (0,-1)] = fs, np.max(fs) + 1.
+    
+    x_pad = np.empty((N+2, D))
+    x_pad[1:-1, :], x_pad[0, :], x_pad[-1, :] = x, x[0, :], x[-1, :]
+    
+    results = []
+    for i in range(M):
+        epi = np.column_stack((x_pad, fs_pad[i, :]))
+        hull = ConvexHull(epi)
+        result = [v-1 for v in hull.vertices if 0 < v <= N]
+        #result.sort()
+        results.append(np.array(result))
+    
+    return np.array(results)
+
+def is_vertex(points):
+    ### TODO: need to vectorize this function....
+    #print(points.shape)
+    N, D = points.shape
+    vertices = convex_envelope(points[:, :-1], points[:, -1])[0]
+    s = np.zeros(N)
+    s[vertices] = 1
+    return s.astype("bool")
+    
+def is_tight(design_space, true_y):
+
+    points = jnp.hstack([design_space, true_y[:, jnp.newaxis]])
+    _scipy_hull = lambda points: is_vertex(points) 
+
+    result_shape_dtype = jax.ShapeDtypeStruct(
+          shape=jnp.broadcast_shapes(true_y.shape),
+          dtype='bool')
+
+    return jax.pure_callback(_scipy_hull, result_shape_dtype, points, vectorized=False)
