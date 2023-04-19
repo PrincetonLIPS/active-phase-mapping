@@ -15,11 +15,15 @@ from jaxutils import Dataset
 from elliptical_slice_sampler_jax import elliptical_slice_jax
 from gp_model import make_preds, update_model
 from search_no_gpjax import sample_from_posterior
+from compute_envelope import is_tight
 
 # non-jax utilities
 from scipy.spatial import ConvexHull
 import numpy as np
 
+
+
+### TODO: import convex envelope code
 
 def get_next_y(true_y, design_space, next_x):
     return true_y[:,jnp.newaxis][design_space == next_x]
@@ -61,9 +65,13 @@ def get_next_candidate(posterior, params, dataset, designs, design_space, rng_ke
 
     # updates the model and samples T functions and computes their envelopes. here we evaluate functions only at points in the design space
     pred_mean, pred_cov = make_preds(dataset, posterior, params, design_space)
-    pred_Y, envelopes, pred_cK = sample_from_posterior(pred_mean, pred_cov, design_space, T)
+    #pred_Y, envelopes, pred_cK = sample_from_posterior(pred_mean, pred_cov, design_space, T)
     # compute the vector of indicators
-    tights = jnp.abs(envelopes.T - pred_Y) < tol 
+    #tights = jnp.abs(envelopes.T - pred_Y) < tol
+    
+    pred_Y, _, pred_cK = sample_from_posterior(pred_mean, pred_cov, design_space, T, get_env=False)
+    get_tights = jax.jit(jax.vmap(lambda y: is_tight(design_space, y), in_axes=(1,)))
+    tights = get_tights(pred_Y).T
     
     # TODO: move the lambda function into the vmap to make it cleaner
     compute_IG_putative_wrap = lambda x: compute_IG_putative_x(x, design_space, dataset, posterior, params, pred_cK, pred_Y, tights, rng_key, T = T, J = J) 
@@ -139,70 +147,3 @@ def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, param
     # evaluate the log probability on the samples y^{(j)}
     return -ypred_kde.logpdf(ystars).mean() # inner MC estimate
     
-
-# TODO: check this for correctness
-def convelope(design_space, knot_y):
-
-    N, D = design_space.shape
-    d_kernel = jax.jit(jax.vmap(jax.grad(jax.grad(lambda x1, x2, ls: kernel_old(x1, x2, ls)[0,0], argnums=0), argnums=1), in_axes=(0,0,None)))
-    # TODO: 
-    #deriv_marg_var = np.max(jnp.diag(d_kernel(knot_x, knot_x, ls)))
-    deriv_marg_var = 50 #100
-    s = jnp.linspace(-3*jnp.sqrt(deriv_marg_var), 3*jnp.sqrt(deriv_marg_var), 200)
-    ss = jnp.meshgrid(*[s.ravel()]*D)
-    s = jnp.array([sx.flatten() for sx in ss]).T
-    knot_y = jnp.atleast_2d(knot_y) # samples x num_primal
-    prod = (design_space @ s.T).T
-    
-    # compute the conjugate
-    lft1 = jnp.max(prod[jnp.newaxis,:,:] - knot_y[:,jnp.newaxis,:],  axis=2) # samples x num_dual
-    # compute the biconjugate
-    lft2 = jnp.max(prod[jnp.newaxis,:,:] - lft1[:,:,jnp.newaxis],  axis=1) # samples x num_primal
-    
-    return lft2
-
-
-def convex_envelope(x, fs):
-    """Computes convex envelope.
-    x is an (N, D)-matrix corresponding to the grid in D-dimensional space and fs is an (N, N)-matrix.
-    
-    Arguments:
-    x: (N,D) numpy array.
-    y: (N,1) or shape=(N,) numpy array."""
-
-    if len(fs.shape) == 1: fs = np.reshape(fs, (fs.shape[0], -1))
-    N, _ = fs.shape
-    D = x.shape[1]
-
-    # compute epigraph 
-    fs_pad = np.empty((N+2, 1))
-    fs_pad[1:-1] = fs
-    fs_pad[(0,-1)] = np.max(fs) + 1
-    
-    x_pad = np.empty((N+2, D))
-    x_pad[1:-1, :], x_pad[0, :], x_pad[-1, :] = x, x[0, :], x[-1, :]
-    
-    epi = np.column_stack((x_pad, fs_pad))
-    hull = ConvexHull(epi)
-    result = [v - 1 for v in hull.vertices if 0 < v <= N]
-    
-    return np.array(result)
-
-def is_vertex(points):
-    N, D = points.shape
-    vertices = convex_envelope(points[:, :-1], points[:, -1])
-    s = np.zeros(N)
-    s[vertices] = 1
-    return s.astype("bool")
-
-@jit
-def is_tight(design_space, true_y):
-
-    points = jnp.hstack([design_space, true_y[:, jnp.newaxis]])
-    _scipy_hull = lambda points: is_vertex(points) 
-
-    result_shape_dtype = jax.ShapeDtypeStruct(
-          shape=jnp.broadcast_shapes(true_y.shape),
-          dtype='bool')
-
-    return jax.pure_callback(_scipy_hull, result_shape_dtype, points, vectorized=False)

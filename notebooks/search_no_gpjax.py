@@ -8,7 +8,7 @@ config.update("jax_enable_x64", True)
 
 import numpy.random as npr 
 
-ls_default = 0.05
+ls_default = 0.1
 
 # Non GPjax code
 def kernel_rbf(x1, x2):
@@ -104,7 +104,7 @@ def add_observation(data, true_y, next_x, design_space, design_inds):
     return (train_x, train_y)
 
 
-def sample_from_posterior(pred_mean, pred_cov, design_space, T):
+def sample_from_posterior(pred_mean, pred_cov, design_space, T, get_env=False):
     # TODO: clean this up -- not necessary
     # sample functions ~ posterior
     N_designs = design_space.shape[0]
@@ -112,7 +112,10 @@ def sample_from_posterior(pred_mean, pred_cov, design_space, T):
     # get T samples from the posterior
     pred_Y = pred_cK.T @ npr.randn(N_designs, T) + pred_mean[:, jnp.newaxis]
     # get s by computing the vector of tights w.r.t. posterior samples
-    envelopes = convelope(design_space, pred_Y.T)
+    if get_env:
+        envelopes = convelope(design_space, pred_Y.T)
+    else:
+        envelopes = None
     
     return pred_Y, envelopes, pred_cK
 

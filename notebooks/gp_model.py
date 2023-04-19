@@ -10,7 +10,7 @@ import jaxkern as jk
 import optax as ox
 from jaxutils import Dataset
 
-ls_default = 0.05
+ls_default = 0.1
 
 def make_preds(dataset, posterior, params, test_x, verbose=False):
 
