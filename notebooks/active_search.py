@@ -52,7 +52,7 @@ def get_next_candidate_baseline(posterior, params, dataset, designs, design_spac
 
 ###############################################################################
 
-def get_next_candidate(posterior, params, dataset, designs, design_space, rng_key, T=30, J=40, tol=1e-3):
+def get_next_candidate(posterior, params, dataset, designs, design_space, rng_key, T=30, J=40, tol=0):
     """
     Given current data and a list of designs, computes an IG score for each design. 
     
@@ -70,11 +70,11 @@ def get_next_candidate(posterior, params, dataset, designs, design_space, rng_ke
     #tights = jnp.abs(envelopes.T - pred_Y) < tol
     
     pred_Y, _, pred_cK = sample_from_posterior(pred_mean, pred_cov, design_space, T, get_env=False)
-    get_tights = jax.jit(jax.vmap(lambda y: is_tight(design_space, y), in_axes=(1,)))
+    get_tights = jax.jit(jax.vmap(lambda y: is_tight(design_space, y, tol), in_axes=(1,)))
     tights = get_tights(pred_Y).T
     
     # TODO: move the lambda function into the vmap to make it cleaner
-    compute_IG_putative_wrap = lambda x: compute_IG_putative_x(x, design_space, dataset, posterior, params, pred_cK, pred_Y, tights, rng_key, T = T, J = J) 
+    compute_IG_putative_wrap = lambda x: compute_IG_putative_x(x, design_space, dataset, posterior, params, pred_cK, pred_Y, tights, rng_key, T = T, J = J, tol=tol) 
     compute_IG_vmap = jax.jit(jax.vmap(compute_IG_putative_wrap, in_axes=0))
     
     # TODO: faster to find relevant indicies?
@@ -86,7 +86,7 @@ def get_next_candidate(posterior, params, dataset, designs, design_space, rng_ke
     return designs[entropy_change.argmax()], entropy_change
 
 
-def compute_IG_putative_x(putative_x, design_space, dataset, posterior, params, pred_cK, pred_Y, tights, rng_key, T=100, J=200):
+def compute_IG_putative_x(putative_x, design_space, dataset, posterior, params, pred_cK, pred_Y, tights, rng_key, T=100, J=200, tol=0):
     """
     Compute a Monte Carlo approximation of the IG w.r.t. T samples of s_t ~ p(s | data).
     
@@ -98,14 +98,14 @@ def compute_IG_putative_x(putative_x, design_space, dataset, posterior, params, 
 
     def entropy_est_wrap(args):
         tights_i, pred_Y_i = args
-        return ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, params, tights_i, pred_Y_i, pred_cK, rng_key, J=J)
+        return ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, params, tights_i, pred_Y_i, pred_cK, rng_key, J=J, tol=tol)
     ventropy_est = jax.jit(jax.vmap(entropy_est_wrap, in_axes=((1,1),)))
     entropies = ventropy_est((tights, pred_Y))  
     
     # estimate of the second term in the EIG
     return entropies.mean()
     
-def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, params, s, y, cK, rng_key, J=50):
+def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, params, s, y, cK, rng_key, J=50, tol=0):
     """
     Get samples of function conditioned on tights, get samples of y preds conditioned on 
         these samples, and then estimate the entropy.
@@ -117,7 +117,7 @@ def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, param
     #    return jnp.all(tight == new_tight)
 
     def same_tight(y, tight):
-        new_tight = is_tight(design_space, y)
+        new_tight = is_tight(design_space, y, tol=tol)
         return jnp.all(tight == new_tight)
 
     # samples of f given tights
