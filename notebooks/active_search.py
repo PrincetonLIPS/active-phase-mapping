@@ -15,7 +15,7 @@ from jaxutils import Dataset
 from elliptical_slice_sampler_jax import elliptical_slice_jax
 from gp_model import make_preds, update_model
 from search_no_gpjax import sample_from_posterior
-from compute_envelope import is_tight
+from compute_envelope import is_tight, convelope
 
 # non-jax utilities
 from scipy.spatial import ConvexHull
@@ -85,8 +85,43 @@ def get_next_candidate(posterior, params, dataset, designs, design_space, rng_ke
     entropy_change = curr_entropy - mean_entropy
     return designs[entropy_change.argmax()], entropy_change
 
+def get_next_candidate_1D(posterior, params, dataset, designs, design_space, rng_key, T=30, J=40, tol=0):
+    """
+    Given current data and a list of designs, computes an IG score for each design. 
+    
+    T: number of outer MC samples
+    J: number of inner MC samples
+    tol: tolerance for considering what is tight w.r.t. the convex hull
+    
+    Returns the best design and the list of scores. 
+    """
 
-def compute_IG_putative_x(putative_x, design_space, dataset, posterior, params, pred_cK, pred_Y, tights, rng_key, T=100, J=200, tol=0):
+    # updates the model and samples T functions and computes their envelopes. here we evaluate functions only at points in the design space
+    pred_mean, pred_cov = make_preds(dataset, posterior, params, design_space)
+    pred_Y, envelopes, pred_cK = sample_from_posterior(pred_mean, pred_cov, design_space, T, get_env=True)
+    # compute the vector of indicators
+    tights = jnp.abs(envelopes.T - pred_Y) < tol
+    
+    #pred_Y, _, pred_cK = sample_from_posterior(pred_mean, pred_cov, design_space, T, get_env=False)
+    #get_tights = jax.jit(jax.vmap(lambda y: is_tight(design_space, y, tol), in_axes=(1,)))
+    #tights = get_tights(pred_Y).T
+    
+    # TODO: move the lambda function into the vmap to make it cleaner
+    compute_IG_putative_wrap = lambda x: compute_IG_putative_x(x, design_space, dataset, 
+                                                               posterior, params, pred_cK, pred_Y, tights, rng_key, 
+                                                               T = T, J = J, tol=tol, use1d=True) 
+    compute_IG_vmap = jax.jit(jax.vmap(compute_IG_putative_wrap, in_axes=0))
+    
+    # TODO: faster to find relevant indicies?
+    _, pred_cov_designs = make_preds(dataset, posterior, params, designs)
+    curr_entropy = 0.5 * jnp.log(2 * jnp.pi * jnp.e * jnp.diag(pred_cov_designs)) 
+    mean_entropy = compute_IG_vmap(designs)
+    
+    entropy_change = curr_entropy - mean_entropy
+    return designs[entropy_change.argmax()], entropy_change
+
+
+def compute_IG_putative_x(putative_x, design_space, dataset, posterior, params, pred_cK, pred_Y, tights, rng_key, T=100, J=200, tol=0, use1d=False):
     """
     Compute a Monte Carlo approximation of the IG w.r.t. T samples of s_t ~ p(s | data).
     
@@ -98,23 +133,23 @@ def compute_IG_putative_x(putative_x, design_space, dataset, posterior, params, 
 
     def entropy_est_wrap(args):
         tights_i, pred_Y_i = args
-        return ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, params, tights_i, pred_Y_i, pred_cK, rng_key, J=J, tol=tol)
+        return ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, params, tights_i, pred_Y_i, pred_cK, rng_key, J=J, tol=tol, use1d=use1d)
     ventropy_est = jax.jit(jax.vmap(entropy_est_wrap, in_axes=((1,1),)))
     entropies = ventropy_est((tights, pred_Y))  
     
     # estimate of the second term in the EIG
     return entropies.mean()
     
-def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, params, s, y, cK, rng_key, J=50, tol=0):
+def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, params, s, y, cK, rng_key, J=50, tol=0, use1d=False):
     """
     Get samples of function conditioned on tights, get samples of y preds conditioned on 
         these samples, and then estimate the entropy.
     """
     # sample J*3 number of points but only keep the last J 
-    #def same_tight_1d(y, tight):
-    #    new_hull = convelope(design_space, y).ravel()
-    #    new_tight = y - new_hull < 1e-3
-    #    return jnp.all(tight == new_tight)
+    def same_tight_1d(y, tight):
+        new_hull = convelope(design_space, y).ravel()
+        new_tight = y - new_hull < 1e-3
+        return jnp.all(tight == new_tight)
 
     def same_tight(y, tight):
         new_tight = is_tight(design_space, y, tol=tol)
@@ -122,7 +157,10 @@ def ess_and_estimate_entropy(putative_x, design_space, dataset, posterior, param
 
     # samples of f given tights
     totsamps = J*3
-    samps = elliptical_slice_jax(y.ravel(), lambda x: jnp.log(same_tight(x, s)), cK, totsamps, rng_key)
+    if use1d:
+        samps = elliptical_slice_jax(y.ravel(), lambda x: jnp.log(same_tight_1d(x, s)), cK, totsamps, rng_key)
+    else:
+        samps = elliptical_slice_jax(y.ravel(), lambda x: jnp.log(same_tight(x, s)), cK, totsamps, rng_key)
     test_samps = samps[totsamps-J:totsamps]
     
     x_ind = (putative_x == design_space).argmax()
