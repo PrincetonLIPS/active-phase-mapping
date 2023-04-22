@@ -37,7 +37,7 @@ def plot_candidate(knot_x, true_y, true_envelope, pred_mean, pred_cov, envelopes
         plt.legend(ncol=2)
 
     plt.ylim(-3,3); plt.xlabel("Composition space"); plt.ylabel("Energy")
-    
+    plt.show()
     
 def plot_eig(knot_x, scores):
     plt.figure(figsize=(10,4))
