@@ -39,16 +39,17 @@ def update_model(dataset, design_space, rng_key, update_params=False, num_iters=
         opt = ox.adam(learning_rate=lr)
         parameter_state = gpx.initialise(posterior, key=rng_key)
         parameter_state = gpx.fit(mll, parameter_state, opt, num_iters=num_iters)
+        params = parameter_state.params
     else:
         # Use default parameters
         if init_params is None:
             parameter_state = gpx.initialise(posterior, key=rng_key, 
                                          kernel={"lengthscale": jnp.array([ls_default]), "variance": jnp.array([1])},
                                         likelihood={'obs_noise': jnp.array([0])})
+            params = parameter_state.params
         else:
-            pass # TODO: make it possible to pass in initial parameters for the kernel
-
-    params = parameter_state.params
+            params = init_params      
+    
     pred_mean, pred_cov = make_preds(dataset, posterior, params, design_space) 
     
     return pred_mean, pred_cov, posterior, params
