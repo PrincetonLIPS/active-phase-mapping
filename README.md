@@ -16,6 +16,17 @@ pip install jax jaxlib
 pip install gpjax
 ```
 
+If using GPUs with jax,
+```
+pip install --upgrade "jax[cuda]\" -f https://storage.googleapis.com/jax-releases/jax_cuda_releases.html"
+```
+
+Other package dependencies:
+* matplotlib
+* python-ternary
+
+
+
 ## Code notes
 
 Currently active_search.py contains the active search algorithms and
