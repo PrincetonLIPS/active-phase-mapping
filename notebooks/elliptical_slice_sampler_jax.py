@@ -10,7 +10,6 @@ def elliptical_slice_jax(x0, log_lh_func, chol, num_samples, rng_key):
     @jax.jit
     def ess_step_condfun(state):
         x, new_x, nu, thresh, lower, upper, rng_key = state
-        llh = log_lh_func(new_x)
         return log_lh_func(new_x) < thresh
 
     @jax.jit

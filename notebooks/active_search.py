@@ -55,6 +55,7 @@ def ess_and_estimate_entropy_gpjax(putative_x, design_space, dataset, posterior,
         these samples, and then estimate the entropy.
     """
     # sample J*3 number of points but only keep the last J 
+    @jit
     def same_tight(y, tight):
         new_hull = convelope(design_space, y).ravel()
         new_tight = y - new_hull < 1e-10 #1e-3
@@ -145,12 +146,7 @@ def ess_and_estimate_entropy_gpjax_test(putative_x, design_space, dataset, poste
         these samples, and then estimate the entropy.
     """
     # sample J*3 number of points but only keep the last J 
-    
-    def same_tight_1d(y, tight):
-        new_hull = convelope(design_space, y).ravel()
-        new_tight = y - new_hull < 1e-3
-        return jnp.all(tight == new_tight)
-
+    @jit
     def same_tight(y, tight):
         new_tight = is_tight(design_space, y)
         return jnp.all(tight == new_tight)

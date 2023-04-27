@@ -24,6 +24,7 @@ pip install --upgrade "jax[cuda]\" -f https://storage.googleapis.com/jax-release
 Other package dependencies:
 * matplotlib
 * python-ternary
+* pandas
 
 
 
