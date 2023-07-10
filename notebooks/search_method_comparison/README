@@ -1,0 +1,9 @@
+Data: contains CSVs detailing performance of various search methods. There should be a separate CSV for each search method. 
+Figs: contains comparison plots for various search methods.  
+Scripts: various search methods plus helper functions. 
+Scripts starting with 0-4 are all different search methods. They just differ in how they make decisions. 
+0—chooses points randomly
+1—chooses the point that is farthest from all other points. Here, the farthese point is one whose whose nearest neighbor is farthest. 
+2—baseline active search that learns about the energy surface, not the convex hull.
+3—one version of convex hull aware active search. I calculate the information entropy using a “mean-field” approach where I treat the compositions separately. This was simpler and easier to iterate with as I built up figures.
+4—CHAASE, but with Diana’s method for calculating joint entropies.  
