@@ -1,3 +1,0 @@
-Error is calculated as a function of hull energy, not classification.
-Script generalizes to n-polymorphs. 
-scripts/3_chaase_mean_field_1D.py -- script that runs search. 
