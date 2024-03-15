@@ -1,6 +1,6 @@
 # active-phase-mapping
 
-Code for active phase mapping.
+Code for active phase mapping. Paper can be found here: https://arxiv.org/abs/2402.15582
 
 ## Setup notes
 
@@ -18,12 +18,5 @@ pip install gpjax
 
 ## Code notes
 
-Currently active_search.py contains the active search algorithms and
-relevant plotting utilities, and gp_model.py contains the GP-related model
-utilities.
-
-
-TODO:
-* Notebook: 1-simplex synthetic example in a notebook
-* Notebook: 2-simplex synthetic example in a notebook
-* Notebook: 2-simplex on alloy data with hyperparameter learning
+The active learning algorithms are in the active_learning directory.
+All data generated in the performance testing can be found in the performance_test directory. 
