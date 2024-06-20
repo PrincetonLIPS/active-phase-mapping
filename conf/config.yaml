@@ -1,0 +1,39 @@
+hydra:
+  run:
+    dir: .
+  job_logging:
+    version: 1
+    disable_existing_loggers: false
+    formatters:
+      simple:
+        format: '%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    handlers:
+      console:
+        class: logging.StreamHandler
+        level: INFO
+        formatter: simple
+        stream: ext://sys.stderr
+    root:
+      level: INFO
+      handlers: [console]
+    loggers:
+      hydra:
+        level: INFO
+        handlers: [console]
+        propagate: false
+
+gp:
+  kernel: Matern52
+  lengthscale_prior: [0.01, 1.0]
+  amplitude_prior: [0.01, 10.0]
+  noiseless_prob: 0.5
+  noise_prior: [0.01, 0.1]
+  jitter: 1e-6
+
+mockup:
+  seed: 131313
+  num_species: 3
+  num_atoms: 24
+  noise: 0.0
+  num_phases: 2
+
