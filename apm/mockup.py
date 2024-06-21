@@ -31,7 +31,7 @@ class Mockup:
     ''' Compute all possible compositions, assuming a discrete number of atoms
     in the supercell can be simulated. '''
     cand = jnp.stack(
-      jnp.meshgrid(*[jnp.arange(self.num_atoms)]*self.num_species), 
+      jnp.meshgrid(*[jnp.arange(self.num_atoms+1)]*self.num_species), 
       axis=-1,
     ).reshape(-1, self.num_species)
     return cand[jnp.sum(cand, axis=1)==self.num_atoms,:]/self.num_atoms
@@ -79,3 +79,7 @@ class Mockup:
     energies = jnp.einsum('ijk,ij->ik', chol_K, Z).T
 
     return energies
+  
+  def eval_phases(self, idx):
+    ''' Evaluate the energies. '''
+    return self.energies[idx,:]

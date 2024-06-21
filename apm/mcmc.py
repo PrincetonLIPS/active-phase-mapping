@@ -27,10 +27,12 @@ def cond(pred, true_fun, false_fun, *operands):
   else:
     return false_fun(*operands)
 
-def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning=10):
+def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning=1):
   ''' This function performs slice sampling of the hyperparameters of the 
   Gaussian process. Assumes zero noise.  The mean is subtracted from the
-  outputs.
+  outputs.  No stepping out is performed; instead the prior is assumed to be
+  uniform on a box and that is taken to provide the bounds.  Hyperrectangle
+  sampling is used rather than unidirectonal slice sampling.  
 
   Args:
     rng: The random number generator.
