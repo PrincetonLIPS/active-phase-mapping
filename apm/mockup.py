@@ -76,6 +76,6 @@ class Mockup:
 
     # Generate random energies.
     Z = jrnd.normal(rng, (self.num_phases, self.all_candidates.shape[0]))
-    energies = jnp.einsum('ijk,ij->ik', chol_K, Z)
+    energies = jnp.einsum('ijk,ij->ik', chol_K, Z).T
 
     return energies
