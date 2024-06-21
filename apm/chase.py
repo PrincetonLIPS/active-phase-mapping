@@ -145,43 +145,14 @@ class CHASE:
     # Compute the minimum energies across phases.
     min_energies = jnp.min(posterior_samples, axis=2)
 
-
-    boogedy = jax.jit(jax.vmap(
-        lower_hull_points,
-        in_axes=(None, 0),
-      ))
-    
-    #tight = jax.vmap(boogedy, in_axes=(None, 0))(self.source.all_candidates, min_energies)
-
     #Compute the convex hull mask of the minima for each posterior sample.
-    # tight = jax.vmap(
-    #   jax.vmap(
-    #       lower_hull_points,
-    #       in_axes=(None, 0),
-    #     ),
-    #     in_axes=(None, 0),
-    #   )(self.source.all_candidates, min_energies)
-    #tight.block_until_ready()
+    tight = jax.vmap(
+      jax.vmap(
+          lower_hull_points,
+          in_axes=(None, 0),
+        ),
+        in_axes=(None, 0),
+      )(self.source.all_candidates, min_energies)
+    tight.block_until_ready()
     t4 = time.time()
-    #log.info("Convex hull computation took %f seconds." % (t4-t3))
-
-    #print(jax.make_jaxpr(boogedy)(self.source.all_candidates, min_energies[0,:,:]))
-
-    from scipy.spatial import ConvexHull
-
-    print(min_energies.shape)
-    for ii in range(min_energies.shape[0]):
-      for jj in range(min_energies.shape[1]):
-        tt1 = time.time()
-        #thing = lower_hull_points(self.source.all_candidates, min_energies[ii,jj,:])
-        #thing.block_until_ready()
-        foo = ConvexHull(jax.numpy.concatenate((self.source.all_candidates, min_energies[ii,jj,:,jnp.newaxis]), axis=1))
-        tt2 = time.time()
-        log.info("Convex hull computation took %f seconds." % (tt2-tt1))
-      tt3 = time.time()
-      thingy = boogedy(self.source.all_candidates, min_energies[ii,:,:])
-      thingy.block_until_ready()
-      tt4 = time.time()
-      log.info("vmapped convex hull computation took %f seconds." % (tt4-tt3))
-    t5 = time.time()
-    log.info("ALL convex hull computation took %f seconds." % (t5-t4))
+    log.info("Convex hull computation took %f seconds." % (t4-t3))

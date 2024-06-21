@@ -1,33 +1,34 @@
 import jax
 import jax.numpy as jnp
+import numpy as np
 
-from jaxhull.hull import convex_hull as jh_convex_hull
+from scipy.spatial import ConvexHull
 
-@jax.jit
-def lower_hull_points(X, y):
+
+def numpy_lower_hull_points(X, y):
   ''' Return boolean values about which points are tight. '''
 
   # Concatenate the X and y values.
   X = jax.numpy.concatenate((X, y[:,None]), axis=1)
 
   # Get the convex hull.
-  hull = jh_convex_hull(X, jnp.ones(X.shape[0], dtype=bool))
+  hull = ConvexHull(X)
 
-  # Identify downward-facing facets.
-  # Ignore unused facets.
-  downward = jnp.logical_and(hull.normals[:,-1] < 0, hull.facets[:,0] >= 0)
+  # Identify downward-facing facets based on the last coordinate of the normal.
+  downward_facets = hull.equations[:,-2] < 0
 
-  # Make all the facet vertices -1 for non-downward-facing facets.
-  downward_facets = jnp.where(downward[:,jnp.newaxis], hull.facets, -1)
-
-  # Boolean mask on whether the vertices are in a downward-facing facet.
-  tight = jnp.any(downward_facets[jnp.newaxis,:,:] == jnp.arange(X.shape[0])[:,jnp.newaxis,jnp.newaxis], axis=(1,2))
+  # Get the unique set of vertices associated with the downward-facing facets.
+  tight = np.isin(np.arange(X.shape[0]), hull.simplices[downward_facets])
 
   return tight
 
+def lower_hull_points(X, y):
+  result_shape = jax.ShapeDtypeStruct((X.shape[0],), jnp.bool_)
+  return jax.pure_callback(numpy_lower_hull_points, result_shape, X, y)
+
 if __name__ == "__main__":
 
-  rng = jax.random.PRNGKey(2)
+  rng = jax.random.PRNGKey(4)
   x_rng, y_rng = jax.random.split(rng, 2)
   X = jax.random.uniform(x_rng, (50,1))
   y = jax.random.normal(y_rng, (50,))
