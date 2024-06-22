@@ -2,7 +2,10 @@ import jax
 import jax.numpy as jnp
 import jax.random as jrnd
 
+from jax.lax import while_loop, scan
+
 from .kernels import Matern52
+from .gp import log_marginal_likelihood
 
 def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning=1):
   ''' This function performs slice sampling of the hyperparameters of the 
@@ -35,9 +38,10 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
   kernel_fn = globals()[cfg.gp.kernel]
   noise = 0.0 # Assumed
   jitter = cfg.gp.jitter
+  noise_missing = cfg.gp.noise_missing
 
-  apply_K = jax.jit(lambda X, ls, amp: amp * kernel_fn(X/ls) \
-      + jnp.eye(X.shape[0]) * (noise+jitter))
+  #apply_K = jax.jit(lambda X, ls, amp: amp * kernel_fn(X/ls) \
+  #    + jnp.eye(X.shape[0]) * (noise+jitter))
 
   # We jointly sample the length scale and amplitude.
 
@@ -50,24 +54,24 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
   # Combine the length scale and amplitude into a single vector.
   init_hypers = jnp.hstack([init_ls, init_amp[:,jnp.newaxis]]).T
 
-  # Subtract off the means.
-  Y = Y - jnp.mean(Y, axis=0)
+  # FIXME: Subtract off the means.
+  #Y = Y - jnp.mean(Y, axis=0)
 
-  # The log posterior for a single phase.
-  def log_posterior(hypers, y):
-    ls  = hypers[:-1]
-    amp = hypers[-1]
-    K = apply_K(X, ls, amp)
+  # # The log posterior for a single phase.
+  # def log_posterior(hypers, y):
+  #   ls  = hypers[:-1]
+  #   amp = hypers[-1]
+  #   K = apply_K(X, ls, amp)
 
-    # Compute the log marginal likelihood.
-    chol_K = jax.scipy.linalg.cho_factor(K)
-    solved = jax.scipy.linalg.cho_solve(chol_K, y)
-    log_marginal_likelihood = -0.5 * jnp.dot(y, solved) \
-      - jnp.sum(jnp.log(jnp.diag(chol_K[0]))) \
-      - 0.5 * X.shape[0] * jnp.log(2*jnp.pi)
+  #   # Compute the log marginal likelihood.
+  #   chol_K = jax.scipy.linalg.cho_factor(K)
+  #   solved = jax.scipy.linalg.cho_solve(chol_K, y)
+  #   log_marginal_likelihood = -0.5 * jnp.dot(y, solved) \
+  #     - jnp.sum(jnp.log(jnp.diag(chol_K[0]))) \
+  #     - 0.5 * X.shape[0] * jnp.log(2*jnp.pi)
 
-    # The prior is uniform.
-    return log_marginal_likelihood, chol_K[0]
+  #   # The prior is uniform.
+  #   return log_marginal_likelihood, chol_K[0]
   
   # The conditional for determining when we've found a sample.
   def _shrink_while_cond(state):
@@ -88,7 +92,9 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
     )
 
     # Compute the log posterior at the new sample.
-    lp, chol_K = log_posterior(new_hypers, y)
+    lp, chol_K = log_marginal_likelihood(
+      X, y, new_hypers[:-1], new_hypers[-1], kernel_fn, jitter, noise_missing,
+    )
 
     # Shrink the box.
     box = jnp.vstack([
@@ -107,12 +113,14 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
     thresh_rng, rng = jrnd.split(rng)
 
     # Get the slice.
-    init_lp, chol_K = log_posterior(hypers, y)
+    init_lp, chol_K = log_marginal_likelihood(
+      X, y, hypers[:-1], hypers[-1], kernel_fn, jitter, noise_missing,
+    )
     thresh = jnp.log(jax.random.uniform(thresh_rng)) + init_lp
 
     # Get the initial box for each step based on the prior.
     # Then sample and shrink until we accept.
-    _, hypers, final_lp, _, _, _, chol_K, iters = jax.lax.while_loop(
+    _, hypers, final_lp, _, _, _, chol_K, iters = while_loop(
       _shrink_while_cond,
       _shrink_while_body,
       (thresh, hypers, init_lp, init_box, rng, y, chol_K, jnp.array(0)),
@@ -134,7 +142,7 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
   
     def _outer_scan_body(state, _):
       hypers, rng = state
-      (hypers, rng, chol_K), _ = jax.lax.scan(
+      (hypers, rng, chol_K), _ = scan(
         _thin_scan_body, 
         (hypers, rng, chol_K_placeholder), 
         None, 
@@ -142,7 +150,7 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
       )
       return (hypers, rng), (hypers, chol_K)
   
-    _, (hypers, chol_K) = jax.lax.scan(
+    _, (hypers, chol_K) = scan(
       _outer_scan_body, 
       (init_hypers, rng),
       None,

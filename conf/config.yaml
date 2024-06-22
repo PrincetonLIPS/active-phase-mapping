@@ -24,7 +24,7 @@ hydra:
 
 chase:
   hypers:
-    num_samples: 10
+    num_samples: 100
     num_burnin: 13
     num_thin: 2
   posterior:
@@ -40,12 +40,13 @@ gp:
   amplitude_prior: [0.01, 10.0]
   noiseless_prob: 0.5
   noise_prior: [0.01, 0.1]
-  jitter: 1e-4
+  jitter: 1e-3
+  noise_missing: 1e3
 
 mockup:
   seed: 1313
   num_species: 3
   num_atoms: 24
   noise: 0.0
-  num_phases: 2
+  num_phases: 3
 

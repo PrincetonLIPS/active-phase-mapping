@@ -80,6 +80,6 @@ class Mockup:
 
     return energies
   
-  def eval_phases(self, idx):
+  def eval_phase(self, cand_idx, phase_idx):
     ''' Evaluate the energies. '''
-    return self.energies[idx,:]
+    return self.energies[cand_idx, phase_idx]
