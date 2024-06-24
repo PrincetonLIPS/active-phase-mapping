@@ -42,6 +42,7 @@ gp:
   noise_prior: [0.01, 0.1]
   jitter: 1e-3
   noise_missing: 1e3
+  num_rff: 1000
 
 mockup:
   seed: 1313

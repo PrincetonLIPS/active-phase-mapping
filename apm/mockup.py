@@ -3,6 +3,7 @@ import jax.numpy as jnp
 import jax.random as jrnd
 import logging
 
+from .utils import stars_and_bars
 from .kernels import sqdist, Matern52
 
 log = logging.getLogger()
@@ -20,6 +21,7 @@ class Mockup:
     self.amp_prior   = cfg.gp.amplitude_prior
     self.kernel      = cfg.gp.kernel
     self.jitter      = cfg.gp.jitter
+    self.num_rff     = cfg.gp.num_rff
 
     self.all_candidates = self._gen_candidates()
     self.energies       = self._gen_energies()
@@ -30,18 +32,14 @@ class Mockup:
   def _gen_candidates(self):
     ''' Compute all possible compositions, assuming a discrete number of atoms
     in the supercell can be simulated. '''
-    cand = jnp.stack(
-      jnp.meshgrid(*[jnp.arange(self.num_atoms+1)]*self.num_species), 
-      axis=-1,
-    ).reshape(-1, self.num_species)
-    return cand[jnp.sum(cand, axis=1)==self.num_atoms,:]/self.num_atoms
+    return stars_and_bars(self.num_atoms, self.num_species).astype(jnp.float32)/self.num_atoms
   
   def _gen_energies(self):
     ''' Generate random energy functions. '''
 
     # Choose lengthscales and amplitudes from the prior.
     rng = jrnd.PRNGKey(self.seed)
-    ls_rng, amp_rng, rng = jrnd.split(rng, 3)
+    ls_rng, amp_rng, proj_rng, phase_rng, wts_rng = jrnd.split(rng, 3)
     self.lengthscales = jrnd.uniform(
       ls_rng, 
       (self.num_phases, self.num_species),
@@ -58,25 +56,10 @@ class Mockup:
     log.info("Amplitudes: %s" % self.amplitudes)
 
     # Get the kernel function from the string in the config file.
-    kernel_fn = globals()[self.kernel]
+    # kernel_fn = globals()[self.kernel]
 
-    # Construct the covariances.
-    # We handle lengthscale, noise, and amplitude outside the kernel.
-    # We vmap over the phases.
-    apply_K = lambda X, ls, amp: amp * kernel_fn(X/ls) \
-      + jnp.eye(X.shape[0]) * (self.noise+self.jitter)
-    K = jax.vmap(apply_K, in_axes=(None, 0, 0))(
-      self.all_candidates, 
-      self.lengthscales, 
-      self.amplitudes,
-    )
+    # Generate random Fourier features.
 
-    # Compute the Cholesky decompositions.
-    chol_K = jax.vmap(jax.scipy.linalg.cholesky)(K)
-
-    # Generate random energies.
-    Z = jrnd.normal(rng, (self.num_phases, self.all_candidates.shape[0]))
-    energies = jnp.einsum('ijk,ij->ik', chol_K, Z).T
 
     return energies
   
