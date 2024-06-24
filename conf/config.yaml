@@ -45,7 +45,7 @@ gp:
 
 mockup:
   seed: 1313
-  num_species: 3
+  num_species: 4
   num_atoms: 24
   noise: 0.0
   num_phases: 3
