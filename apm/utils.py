@@ -44,13 +44,13 @@ def sqdist(X: jax.Array, Y: Optional[jax.Array]=None) -> jax.Array:
       + jnp.sum(Y**2, axis=-1)[jnp.newaxis, :] \
       - 2 * jnp.dot(X, Y.T))
   
-def multivariate_t_rvs(rng, mu, Sigma, df, shape):
+def multivariate_t_rvs(rng, mu, sigma, df, shape):
   ''' Generate random samples from a multivariate t-distribution.
 
   Args:
     rng: PRNGKey, the random number generator key.
     mu: jnp.ndarray, shape (d,), the mean of the distribution.
-    Sigma: jnp.ndarray, shape (d, d), the scale matrix of the distribution.
+    sigma: jnp.ndarray, shape (d, d), the scale matrix of the distribution.
     df: float, the degrees of freedom of the distribution.
     shape: tuple, the shape of the output.
 
@@ -63,7 +63,7 @@ def multivariate_t_rvs(rng, mu, Sigma, df, shape):
   Z = jrnd.multivariate_normal(
     norm_rng,
     mean=jnp.zeros_like(mu),
-    cov=Sigma,
+    cov=sigma,
     shape=shape,
   )
 

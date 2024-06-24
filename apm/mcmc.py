@@ -4,8 +4,8 @@ import jax.random as jrnd
 
 from jax.lax import while_loop, scan
 
-from .kernels import Matern52
-from .gp import log_marginal_likelihood
+#from .kernels import Matern52
+#from .gp import log_marginal_likelihood
 
 def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning=1):
   ''' This function performs slice sampling of the hyperparameters of the 

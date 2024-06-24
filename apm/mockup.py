@@ -3,8 +3,8 @@ import jax.numpy as jnp
 import jax.random as jrnd
 import logging
 
-from .utils import stars_and_bars
-from .kernels import sqdist, Matern52
+from .utils import stars_and_bars, multivariate_t_rvs
+#from .kernels import sqdist, Matern52
 
 log = logging.getLogger()
 
@@ -39,7 +39,7 @@ class Mockup:
 
     # Choose lengthscales and amplitudes from the prior.
     rng = jrnd.PRNGKey(self.seed)
-    ls_rng, amp_rng, proj_rng, phase_rng, wts_rng = jrnd.split(rng, 3)
+    ls_rng, amp_rng, proj_rng, phase_rng, wts_rng = jrnd.split(rng, 5)
     self.lengthscales = jrnd.uniform(
       ls_rng, 
       (self.num_phases, self.num_species),
@@ -59,7 +59,31 @@ class Mockup:
     # kernel_fn = globals()[self.kernel]
 
     # Generate random Fourier features.
+    # TODO: factor this out once we see how it goes.
+    rff_projections = multivariate_t_rvs(
+      proj_rng, 
+      mu=jnp.zeros(self.num_species), 
+      sigma=jnp.eye(self.num_species), 
+      df=5, # Matern 5/2
+      shape=(self.num_phases, self.num_rff),
+    ) 
+    rff_phases = jrnd.uniform(
+      phase_rng, 
+      (self.num_phases, self.num_rff),
+      minval=0.0,
+      maxval=2*jnp.pi,
+    )
+    rff_weights = jrnd.normal(
+      wts_rng, 
+      (self.num_phases, self.num_rff),
+    ) * jnp.sqrt(2/self.num_rff)
 
+    # Rescale the projections to have the correct lengthscales.
+    rff_projections = rff_projections / self.lengthscales[:,jnp.newaxis,:]
+
+    project_cand = jnp.einsum('ij,klj->ikl', self.all_candidates, rff_projections)
+    basis_funcs = jnp.cos(project_cand + rff_phases)
+    energies = jnp.einsum('ijk,jk->ij', basis_funcs, rff_weights)
 
     return energies
   

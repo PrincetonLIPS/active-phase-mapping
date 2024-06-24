@@ -4,7 +4,7 @@ import jax.random as jrnd
 import logging
 import time
 
-from .kernels import Matern52
+#from .kernels import Matern52
 from .mcmc import slice_sample_hypers
 from .hull import lower_hull_points
 
