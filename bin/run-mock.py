@@ -21,8 +21,8 @@ def main(cfg: DictConfig) -> None:
   mockup = Mockup(cfg)
 
   chase = CHASE(cfg, mockup, jrnd.PRNGKey(1))
-  #chase.corner_init()
-  #chase.select_next()
+  chase.corner_init()
+  chase.select_next()
 
 
   # Plot the mockup function.

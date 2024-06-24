@@ -3,6 +3,8 @@ from typing import Optional
 import jax
 import jax.numpy as jnp
 
+from ...utils import sqdist
+
 def Matern52(X: jax.Array, Y: Optional[jax.Array]=None) -> jax.Array:
   ''' Compute the Matern 5/2 kernel function between two sets of points, or
       within a single set of points.

@@ -76,7 +76,7 @@ class Mockup:
     rff_weights = jrnd.normal(
       wts_rng, 
       (self.num_phases, self.num_rff),
-    ) * jnp.sqrt(2/self.num_rff)
+    ) * jnp.sqrt(2/self.num_rff) * self.amplitudes[:,jnp.newaxis]
 
     # Rescale the projections to have the correct lengthscales.
     rff_projections = rff_projections / self.lengthscales[:,jnp.newaxis,:]

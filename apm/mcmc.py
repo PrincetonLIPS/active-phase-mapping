@@ -4,8 +4,8 @@ import jax.random as jrnd
 
 from jax.lax import while_loop, scan
 
-#from .kernels import Matern52
-#from .gp import log_marginal_likelihood
+from .gp.kernels import Matern52
+from .gp import log_marginal_likelihood
 
 def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning=1):
   ''' This function performs slice sampling of the hyperparameters of the 
@@ -40,7 +40,7 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
   jitter = cfg.gp.jitter
   noise_missing = cfg.gp.noise_missing
 
-  #apply_K = jax.jit(lambda X, ls, amp: amp * kernel_fn(X/ls) \
+  #apply_K = jax.jit(lambda X, ls, amp: amp**2 * kernel_fn(X/ls) \
   #    + jnp.eye(X.shape[0]) * (noise+jitter))
 
   # We jointly sample the length scale and amplitude.

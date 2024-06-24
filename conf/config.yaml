@@ -24,9 +24,9 @@ hydra:
 
 chase:
   hypers:
-    num_samples: 100
-    num_burnin: 13
-    num_thin: 2
+    num_samples: 1000
+    num_burnin: 100
+    num_thin: 5
   posterior:
     num_samples: 100
   elliptical:
@@ -46,8 +46,8 @@ gp:
 
 mockup:
   seed: 1313
-  num_species: 4
+  num_species: 3
   num_atoms: 24
   noise: 0.0
-  num_phases: 3
+  num_phases: 2
 
