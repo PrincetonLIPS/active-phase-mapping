@@ -29,8 +29,6 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
             [num_samples x num_phases x num_species]
     amplitudes: The sampled amplitudes.
             [num_samples x num_phases]
-    chol_K: The Cholesky factor of the covariance matrix.
-            [num_samples x num_phases x num_data x num_data]
   '''
 
   num_species = X.shape[1]
@@ -39,11 +37,6 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
   noise = 0.0 # Assumed
   jitter = cfg.gp.jitter
   noise_missing = cfg.gp.noise_missing
-
-  #apply_K = jax.jit(lambda X, ls, amp: amp**2 * kernel_fn(X/ls) \
-  #    + jnp.eye(X.shape[0]) * (noise+jitter))
-
-  # We jointly sample the length scale and amplitude.
 
   # Get the initial box for each step based on the prior.
   init_box = jnp.array([
@@ -56,31 +49,15 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
 
   # FIXME: Subtract off the means.
   #Y = Y - jnp.mean(Y, axis=0)
-
-  # # The log posterior for a single phase.
-  # def log_posterior(hypers, y):
-  #   ls  = hypers[:-1]
-  #   amp = hypers[-1]
-  #   K = apply_K(X, ls, amp)
-
-  #   # Compute the log marginal likelihood.
-  #   chol_K = jax.scipy.linalg.cho_factor(K)
-  #   solved = jax.scipy.linalg.cho_solve(chol_K, y)
-  #   log_marginal_likelihood = -0.5 * jnp.dot(y, solved) \
-  #     - jnp.sum(jnp.log(jnp.diag(chol_K[0]))) \
-  #     - 0.5 * X.shape[0] * jnp.log(2*jnp.pi)
-
-  #   # The prior is uniform.
-  #   return log_marginal_likelihood, chol_K[0]
   
   # The conditional for determining when we've found a sample.
   def _shrink_while_cond(state):
-    thresh, cur_hypers, lp, box, rng, y, chol_K, iter = state
+    thresh, cur_hypers, lp, box, rng, y, iter = state
     return jnp.logical_or(iter == 0, jnp.logical_or(jnp.isnan(lp), thresh > lp))
   
   # The main body for shrinking the box and sampling uniformly.
   def _shrink_while_body(state):
-    thresh, cur_hypers, lp, box, rng, y, chol_K, iter = state
+    thresh, cur_hypers, lp, box, rng, y, iter = state
     
     # Sample from the current box.
     box_rng, rng = jrnd.split(rng)
@@ -92,7 +69,7 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
     )
 
     # Compute the log posterior at the new sample.
-    lp, chol_K = log_marginal_likelihood(
+    lp = log_marginal_likelihood(
       X, y, new_hypers[:-1], new_hypers[-1], kernel_fn, jitter, noise_missing,
     )
 
@@ -105,7 +82,7 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
     # Update the current hypers if we accept.
     cur_hypers = jnp.where(thresh < lp, new_hypers, cur_hypers)
 
-    return thresh, cur_hypers, lp, box, rng, y, chol_K, iter+1
+    return thresh, cur_hypers, lp, box, rng, y, iter+1
 
   # The main slice sampling step for a single phase.
   @jax.jit
@@ -113,53 +90,50 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
     thresh_rng, rng = jrnd.split(rng)
 
     # Get the slice.
-    init_lp, chol_K = log_marginal_likelihood(
+    init_lp = log_marginal_likelihood(
       X, y, hypers[:-1], hypers[-1], kernel_fn, jitter, noise_missing,
     )
     thresh = jnp.log(jax.random.uniform(thresh_rng)) + init_lp
 
     # Get the initial box for each step based on the prior.
     # Then sample and shrink until we accept.
-    _, hypers, final_lp, _, _, _, chol_K, iters = while_loop(
+    _, hypers, final_lp, _, _, _, iters = while_loop(
       _shrink_while_cond,
       _shrink_while_body,
-      (thresh, hypers, init_lp, init_box, rng, y, chol_K, jnp.array(0)),
+      (thresh, hypers, init_lp, init_box, rng, y, jnp.array(0)),
     )
-    return hypers, chol_K, iters, final_lp
-
-  # We need this to get the type right for the scan.
-  chol_K_placeholder = jnp.zeros((X.shape[0],X.shape[0]), dtype=jnp.float32)
+    return hypers, iters, final_lp
 
   # A function we can loop, scan, or perhaps vmap over.
   def _sample_phase(init_hypers, y, rng):
 
     def _thin_scan_body(state, _):
       ''' Take a single slice sample step inside a scan.'''
-      hypers, rng, chol_K = state
+      hypers, rng = state
       sample_rng, rng = jrnd.split(rng)
-      hypers, chol_K, _, _ = _slice_sample_step(hypers, y, sample_rng)
-      return (hypers, rng, chol_K), None
+      hypers, _, _ = _slice_sample_step(hypers, y, sample_rng)
+      return (hypers, rng), None
   
     def _outer_scan_body(state, _):
       hypers, rng = state
-      (hypers, rng, chol_K), _ = scan(
+      (hypers, rng), _ = scan(
         _thin_scan_body, 
-        (hypers, rng, chol_K_placeholder), 
+        (hypers, rng), 
         None, 
         thinning,
       )
-      return (hypers, rng), (hypers, chol_K)
+      return (hypers, rng), (hypers,)
   
-    _, (hypers, chol_K) = scan(
+    _, (hypers,) = scan(
       _outer_scan_body, 
       (init_hypers, rng),
       None,
       num_samples,
     )
 
-    return hypers, chol_K
+    return hypers
 
-  hypers, chol_K = jax.vmap(_sample_phase, in_axes=(1,1,0), out_axes=(1,1))(
+  hypers = jax.vmap(_sample_phase, in_axes=(1,1,0), out_axes=1)(
     init_hypers, 
     Y, 
     jrnd.split(rng, num_phases),
@@ -169,4 +143,4 @@ def slice_sample_hypers(rng, X, Y, cfg, init_ls, init_amp, num_samples, thinning
   lengthscales = hypers[:,:,:-1]
   amplitudes = hypers[:,:,-1]
 
-  return lengthscales, amplitudes, chol_K
+  return lengthscales, amplitudes

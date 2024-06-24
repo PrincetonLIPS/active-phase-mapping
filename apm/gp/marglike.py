@@ -36,7 +36,6 @@ def log_marginal_likelihood(
 
   Returns:
     log_marginal_likelihood: The log marginal likelihood.
-    chol_cov: The Cholesky factor of the covariance matrix.
   '''
   def apply_kernel(X1, X2, ls, amp):
     return amp**2 * kernel_fn(X1/ls, X2/ls)
@@ -63,4 +62,4 @@ def log_marginal_likelihood(
     - jnp.sum(jnp.log(jnp.diag(chol_K_X_X))) \
     - 0.5 * X.shape[0] * jnp.log(2*jnp.pi)
   
-  return lml, chol_K_X_X
+  return lml

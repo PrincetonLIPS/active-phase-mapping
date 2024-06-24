@@ -76,7 +76,7 @@ class CHASE:
     # Generate samples from the posterior on hyperparameters.
     hyper_rng, self.rng = jrnd.split(self.rng)
     t0 = time.time()
-    ls_samples, amp_samples, chol_K_samples = slice_sample_hypers(
+    ls_samples, amp_samples = slice_sample_hypers(
         hyper_rng,
         X,
         Y,
