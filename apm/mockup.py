@@ -76,13 +76,18 @@ class Mockup:
     rff_weights = jrnd.normal(
       wts_rng, 
       (self.num_phases, self.num_rff),
-    ) * jnp.sqrt(2/self.num_rff) * self.amplitudes[:,jnp.newaxis]
+    ) 
 
     # Rescale the projections to have the correct lengthscales.
     rff_projections = rff_projections / self.lengthscales[:,jnp.newaxis,:]
 
+    # Project the candidates.
     project_cand = jnp.einsum('ij,klj->ikl', self.all_candidates, rff_projections)
-    basis_funcs = jnp.cos(project_cand + rff_phases)
+
+    # Scale the basis function so that our prior variance is 1 for the weights.
+    basis_funcs = jnp.cos(project_cand + rff_phases) \
+      * jnp.sqrt(2/self.num_rff) * self.amplitudes[:,jnp.newaxis]
+    
     energies = jnp.einsum('ijk,jk->ij', basis_funcs, rff_weights)
 
     return energies
