@@ -193,16 +193,29 @@ def main(cfg: DictConfig) -> None:
   func_samples = jnp.einsum('ijk,lji->ljk', weight_samples, grid_basis)
   print(func_samples.shape)
 
-  plt.figure(figsize=(10,5))
-  plt.subplot(1, 2, 1)
+  ##############################################################################
+  # Estimate entropy
+  import jax.scipy.stats as stats
+  def entropy(values):
+    kernel = stats.gaussian_kde(values)
+    return -jnp.mean(kernel.logpdf(values))
+  entropies = jax.vmap(entropy)(func_samples.reshape(func_samples.shape[0],-1))
+  print(entropies.shape)
+
+
+  plt.figure(figsize=(5,10))
+  plt.subplot(3, 1, 1)
   plt.plot(data_x, data_y, "o")
   plt.plot(grid_x, samples.T, "k", alpha=0.1)
   plt.ylim(-2, 2)
 
-  plt.subplot(1, 2, 2)
+  plt.subplot(3, 1, 2)
   plt.plot(data_x, data_y, "o")
   plt.plot(grid_x, func_samples.reshape(grid_x.shape[0],-1), "k", alpha=0.1)
   plt.ylim(-2, 2)
+
+  plt.subplot(3, 1, 3)
+  plt.plot(grid_x, entropies)
 
   plt.savefig("test-rff.pdf")
 
