@@ -6,7 +6,7 @@ import logging
 import matplotlib.pyplot as plt
 import time
 
-#jax.config.update("jax_enable_x64", True)
+jax.config.update("jax_enable_x64", True)
 
 from omegaconf import DictConfig
 
@@ -20,7 +20,7 @@ log = logging.getLogger()
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
 
-  seed = 2
+  seed = 1
   rng = jrnd.PRNGKey(seed)
   num_data = 3
   num_phases = 2
@@ -115,16 +115,26 @@ def main(cfg: DictConfig) -> None:
     
     ############################################################################
     # Compute the posterior on weights.
-    def weight_posterior(basis, y, noise):
-      iSigma = jnp.eye(cfg.gp.num_rff) + jnp.dot(basis.T, (1/noise) * basis)
-      chol_iSigma = jax.scipy.linalg.cholesky(iSigma)
-      mu = jnp.dot(jax.scipy.linalg.cho_solve((chol_iSigma, False), basis.T), y/noise)
-      return mu, jax.scipy.linalg.cho_solve((chol_iSigma, False), jnp.eye(cfg.gp.num_rff))
+    def weight_posterior(basis, y, noise, prior_mean, prior_chol):
+      noise = jnp.atleast_1d(noise)
+
+      #prior_iSigma = jax.scipy.linalg.cho_solve((prior_chol, False), jnp.eye(cfg.gp.num_rff))
+
+
+      # STUPID
+      prior_iSigma = jnp.linalg.inv(prior_chol.T @ prior_chol)
+      iSigma = prior_iSigma + jnp.dot(basis.T, (1/noise[:,jnp.newaxis]) * basis)
+      Sigma = jnp.linalg.inv(iSigma)
+      to_solve = jnp.dot(basis.T, y/noise) + jnp.dot(prior_iSigma, prior_mean)
+      mu = Sigma @ to_solve
+
+      #return mu, jax.scipy.linalg.inv(chol_iSigma) # FIXME
+      return mu, jax.scipy.linalg.cholesky(Sigma)
 
     wt_post_means, wt_post_chols = jax.vmap( # over phases
       weight_posterior,
-      in_axes=(1, 1, None),
-    )(train_basis, data_y, cfg.gp.jitter)
+      in_axes=(1, 1, None, None, None),
+    )(train_basis, data_y, cfg.gp.jitter, jnp.zeros((cfg.gp.num_rff,)), jnp.eye(cfg.gp.num_rff))
     # print(wt_post_means.shape, wt_post_chols.shape)
 
     ############################################################################
@@ -137,7 +147,7 @@ def main(cfg: DictConfig) -> None:
     weight_samples = jax.vmap( # vmap over phases
       draw_weight_samples,
       in_axes=(0, 0, 0, None),
-    )(wt_post_means, wt_post_chols, jrnd.split(rng, (num_phases,)),
+    )(wt_post_means, wt_post_chols, jrnd.split(post_weight_rng, (num_phases,)),
       cfg.chase.posterior.num_samples,
     )
     #print(weight_samples.shape)
@@ -151,14 +161,14 @@ def main(cfg: DictConfig) -> None:
     ############################################################################
     # Compute the convex hull of the mins.
     def convex_hull(X, Y):
-      return lower_hull_points(X, jnp.min(Y, axis=1))
+      min_Y = jnp.min(Y, axis=1)
+      tight = lower_hull_points(X, min_Y)
+      return tight[:,jnp.newaxis] * (min_Y[:,jnp.newaxis] == Y)
     
     tight = jax.vmap(
       convex_hull,
       in_axes=(None,0),
     )(grid_x, func_samples)
-
-
 
     ############################################################################
     # Sample conditioned on the hull being the same.
@@ -218,25 +228,78 @@ def main(cfg: DictConfig) -> None:
 
     print('weight_samples', weight_samples.shape)
 
-    idx = 1
+    # One approach: condition on which points are tight. In that case, we use
+    # the posterior on weights to draw samples, and then effectively slice
+    # off any part of the weight space that leads to a different set of points
+    # being tight.  I think this is elegant, but it does not like to move very
+    # much, even away from the tight points.
+    #ess_means = wt_post_means
+    #ess_chols = wt_post_chols
+
+    # Another approach: condition on the hull being exactly the same.  This
+    # means computing a posterior that accounts for the actual values of the
+    # tight points.  This requires a new mean and covariance.
+    def tight_params(tight, funcs, means, chols):
+
+      # All phases together
+      tight_noise = jnp.where(tight, cfg.gp.jitter, cfg.gp.noise_missing)
+
+      print('tight', tight.shape, funcs.shape, tight_noise.shape, means.shape, chols.shape)
+      # Treat the old params as the prior and these as "data".
+      tight_means, tight_chols = jax.vmap( # over phases
+          weight_posterior,
+          in_axes=(1, 1, 1, 0, 0),
+        )(predict_basis, funcs, tight_noise, means, chols)
+      
+      return tight_means, tight_chols
+
+    print('predict_basis', predict_basis.shape)
+
+    idx = 2
+
+    # vmap over posterior samples
+    tight_means, tight_chols = jax.vmap(
+      tight_params,
+      in_axes=(0, 0, None, None),
+    )(tight, func_samples, wt_post_means, wt_post_chols)
+    ess_means = tight_means[idx]
+    ess_chols = tight_chols[idx]
+    print('tight_means', tight_means.shape, tight_chols.shape)
 
     def _ess_scan(carry, _):
       rng, cur_wts = carry
       step_rng, rng = jrnd.split(rng)
-      new_wts = ess_step(step_rng, cur_wts, wt_post_means, wt_post_chols, tight[idx])
+      new_wts = ess_step(step_rng, cur_wts, ess_means, ess_chols, tight[idx])
       return (rng, new_wts), new_wts
     
     ess_rng, rng = jrnd.split(rng)
     _, hull_wts = jax.lax.scan(
       _ess_scan,
       (ess_rng, weight_samples[:,idx,:]),
-      jnp.arange(100),
+      jnp.arange(50),
     )
     print('hull_wts', hull_wts.shape)
 
     # Look at a sample that has the same hull.
     funcs = jnp.einsum('ijk,ljk->ijl', hull_wts, predict_basis)
     print('funcs', funcs.shape)
+
+    # sample directly
+    def foo(rng, mean, chol):
+      Z = jrnd.normal(rng, (chol.shape[0],))
+      return jnp.dot(chol.T, Z) + mean
+    foo_wts = jax.vmap(jax.vmap(
+      foo,
+      in_axes=(0, None, None),
+    ), in_axes=(0, 0, 0))(jrnd.split(rng, (num_phases, 10)), ess_means, ess_chols)
+
+    print('foo_wts', foo_wts.shape)
+    print('predict_basis', predict_basis.shape)
+    foo_funcs = jnp.einsum('ijk,lik->lij', foo_wts, predict_basis)
+
+    meanfunc = jnp.einsum('ik,lik->li', ess_means, predict_basis)
+
+    anytight = jnp.any(tight, axis=2)
 
     ############################################################################
     # Make a plot to look at.
@@ -248,8 +311,10 @@ def main(cfg: DictConfig) -> None:
     plt.plot(grid_x, funcs[:,0,:].T, color='blue', alpha=0.1)
     plt.plot(grid_x, funcs[:,1,:].T, color='red', alpha=0.1)
 
-    plt.plot(grid_x[tight[idx]], 
-             jnp.min(func_samples[idx,:,:], axis=1)[tight[idx]],
+    #plt.plot(grid_x, meanfunc, '--')
+
+    plt.plot(grid_x[anytight[idx]], 
+             jnp.min(func_samples[idx,:,:], axis=1)[anytight[idx]],
              'kx',
     )
     plt.savefig("rff-ess-%d.png" % ii)
