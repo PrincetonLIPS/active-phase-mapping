@@ -6,7 +6,7 @@ import logging
 import matplotlib.pyplot as plt
 import time
 
-jax.config.update("jax_enable_x64", True)
+#jax.config.update("jax_enable_x64", True)
 
 from omegaconf import DictConfig
 
@@ -118,18 +118,25 @@ def main(cfg: DictConfig) -> None:
     def weight_posterior(basis, y, noise, prior_mean, prior_chol):
       noise = jnp.atleast_1d(noise)
 
-      #prior_iSigma = jax.scipy.linalg.cho_solve((prior_chol, False), jnp.eye(cfg.gp.num_rff))
-
-
-      # STUPID
-      prior_iSigma = jnp.linalg.inv(prior_chol.T @ prior_chol)
+      prior_iSigma = jax.scipy.linalg.cho_solve((prior_chol, False), jnp.eye(cfg.gp.num_rff))
       iSigma = prior_iSigma + jnp.dot(basis.T, (1/noise[:,jnp.newaxis]) * basis)
-      Sigma = jnp.linalg.inv(iSigma)
+
+      chol_iSigma = jax.scipy.linalg.cholesky(iSigma)
+
+      # FIXME there must be a better way to do this.
+      # For some reason solve_triangular with identity on chol_iSigma doesn't
+      # do the right thing.
+      #chol_Sigma = jax.scipy.linalg.solve_triangular(chol_iSigma, jnp.eye(cfg.gp.num_rff))
+      Sigma = jax.scipy.linalg.cho_solve((chol_iSigma, False), jnp.eye(cfg.gp.num_rff))
+      chol_Sigma = jax.scipy.linalg.cholesky(Sigma)
+
       to_solve = jnp.dot(basis.T, y/noise) + jnp.dot(prior_iSigma, prior_mean)
-      mu = Sigma @ to_solve
+
+      #mu = Sigma @ to_solve
+      mu = jax.scipy.linalg.cho_solve((chol_iSigma, False), to_solve)
 
       #return mu, jax.scipy.linalg.inv(chol_iSigma) # FIXME
-      return mu, jax.scipy.linalg.cholesky(Sigma)
+      return mu, chol_Sigma
 
     wt_post_means, wt_post_chols = jax.vmap( # over phases
       weight_posterior,
@@ -202,6 +209,7 @@ def main(cfg: DictConfig) -> None:
         # Shrink the bracket.
         upper = jnp.where(theta > 0, theta, upper)
         lower = jnp.where(theta < 0, theta, lower)
+        #jax.debug.print('[{}, {}]', lower, upper)
 
         return (rng, upper, lower, cur, nu, jnp.where(done, theta, jnp.nan))
       
@@ -255,16 +263,17 @@ def main(cfg: DictConfig) -> None:
 
     print('predict_basis', predict_basis.shape)
 
-    idx = 2
+    idx = 2 # posterior sample
 
-    # vmap over posterior samples
+    # vmap over posterior samples to get distribution over weights that fixes
+    # the tight points.
     tight_means, tight_chols = jax.vmap(
       tight_params,
       in_axes=(0, 0, None, None),
     )(tight, func_samples, wt_post_means, wt_post_chols)
+
     ess_means = tight_means[idx]
     ess_chols = tight_chols[idx]
-    print('tight_means', tight_means.shape, tight_chols.shape)
 
     def _ess_scan(carry, _):
       rng, cur_wts = carry
