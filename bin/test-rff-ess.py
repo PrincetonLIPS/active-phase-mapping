@@ -292,14 +292,15 @@ def main(cfg: DictConfig) -> None:
       def _ess_scan(carry, _):
         rng, cur_wts = carry
 
-        #new_wts = jax.vmap(ess_step, in_axes=(0, None, None, None, None, 0))(
-        #  jrnd.split(step_rng, (num_phases,)), cur_wts, ess_means, ess_chols, tight,
-        #  jnp.arange(num_phases))
-        new_wts = []
-        for phase_idx in range(num_phases):
-          step_rng, rng = jrnd.split(rng)
-          new_wts.append(ess_step(step_rng, cur_wts, ess_means, ess_chols, tight, phase_idx))
-        new_wts = jnp.stack(new_wts)
+        step_rng, rng = jrnd.split(rng)
+        new_wts = jax.vmap(ess_step, in_axes=(0, None, None, None, None, 0))(
+          jrnd.split(step_rng, (num_phases,)), cur_wts, ess_means, ess_chols, tight,
+          jnp.arange(num_phases))
+        #new_wts = []
+        #for phase_idx in range(num_phases):
+        #  step_rng, rng = jrnd.split(rng)
+        #  new_wts.append(ess_step(step_rng, cur_wts, ess_means, ess_chols, tight, phase_idx))
+        #new_wts = jnp.stack(new_wts)
 
         return (rng, new_wts), new_wts
 
