@@ -20,7 +20,7 @@ log = logging.getLogger()
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
 
-  seed = 1
+  seed = 2
   rng = jrnd.PRNGKey(seed)
   num_data = 3
   num_phases = 2
@@ -36,7 +36,7 @@ def main(cfg: DictConfig) -> None:
   data_y = jrnd.normal(data_y_rng, (num_data, num_phases))
 
   # num_candidates x num_species
-  grid_x = jnp.linspace(0.0, 5.0, 500)[:,jnp.newaxis]
+  grid_x = jnp.linspace(0.0, 5.0, 300)[:,jnp.newaxis]
 
   ##############################################################################
   # Initialize the hyperparameters.
@@ -201,9 +201,11 @@ def main(cfg: DictConfig) -> None:
     def hull_same_x(weights, target):
       funcs = jnp.einsum('ik,lik->li', weights, predict_basis)
       tight = convex_hull(grid_x, funcs)
+      #jax.debug.print('off {}', jnp.argwhere(tight != target, size=2, fill_value=-1))
+      #jax.debug.print('vals {}', funcs)
       return jnp.all(tight == target)
     
-    def ess_step(rng, cur_wts, mean, chol_cov, target):
+    def ess_step(rng, cur_wts, mean, chol_cov, target, phase_idx):
       bound_rng, nu_rng, rng = jrnd.split(rng, 3)
       init_upper = jrnd.uniform(bound_rng, minval=0, maxval=2*jnp.pi)
       init_lower = init_upper - 2*jnp.pi
@@ -219,39 +221,39 @@ def main(cfg: DictConfig) -> None:
 
         theta = jrnd.uniform(theta_rng, minval=lower, maxval=upper)
 
-        # Compute new weights.
-        new_wts = jnp.cos(theta)*cur + jnp.sin(theta)*nu + mean
+        # Compute new weights, updating only this phase.
+        # Neither cur nor new have a mean offset.
+        new_wts = cur.at[phase_idx].set(        
+            jnp.cos(theta)*cur[phase_idx] + jnp.sin(theta)*nu
+        ) + mean
 
         # Check the hull.
-        done = hull_same_x(new_wts, target)
+        done = jnp.logical_or(hull_same_x(new_wts, target), jnp.abs(upper-lower) < 1e-5) # MAKE PARAM
 
         # Shrink the bracket.
         upper = jnp.where(theta > 0, theta, upper)
         lower = jnp.where(theta < 0, theta, lower)
-        #jax.debug.print('[{}, {}]', lower, upper)
 
         return (rng, upper, lower, cur, nu, jnp.where(done, theta, jnp.nan))
       
-      # Need to vmap this one over phases.
-      def draw_phase_nu(rng, chol):
+      def draw_nu(rng, chol):
         Z = jrnd.normal(rng, (chol.shape[0],))
         return jnp.dot(chol.T, Z)
 
       nu_rng, rng = jrnd.split(rng)
-      nu = jax.vmap(
-        draw_phase_nu,
-        in_axes=(0, 0),
-      )(jrnd.split(nu_rng, num_phases), chol_cov)
+      nu = draw_nu(nu_rng, chol_cov[phase_idx])
 
-      _, _, _, _, _, theta = jax.lax.while_loop(
+      #from apm.fake_lax import while_loop
+      from jax.lax import while_loop
+      _, _, _, _, _, theta = while_loop(
         _while_cond,
         _while_body,
         (rng, init_upper, init_lower, cur_wts-mean, nu, jnp.nan),
       )
 
       new_wts = jnp.cos(theta)*(cur_wts-mean) + jnp.sin(theta)*nu + mean
-
-      return new_wts
+      
+      return new_wts[phase_idx]
 
     # One approach: condition on which points are tight. In that case, we use
     # the posterior on weights to draw samples, and then effectively slice
@@ -289,11 +291,21 @@ def main(cfg: DictConfig) -> None:
 
       def _ess_scan(carry, _):
         rng, cur_wts = carry
-        step_rng, rng = jrnd.split(rng)
-        new_wts = ess_step(step_rng, cur_wts, ess_means, ess_chols, tight)
+
+        #new_wts = jax.vmap(ess_step, in_axes=(0, None, None, None, None, 0))(
+        #  jrnd.split(step_rng, (num_phases,)), cur_wts, ess_means, ess_chols, tight,
+        #  jnp.arange(num_phases))
+        new_wts = []
+        for phase_idx in range(num_phases):
+          step_rng, rng = jrnd.split(rng)
+          new_wts.append(ess_step(step_rng, cur_wts, ess_means, ess_chols, tight, phase_idx))
+        new_wts = jnp.stack(new_wts)
+
         return (rng, new_wts), new_wts
 
-      _, hull_wts = jax.lax.scan(
+      #from apm.fake_lax import scan
+      from jax.lax import scan
+      _, hull_wts = scan(
         _ess_scan,
         (rng, init_wts),
         jnp.arange(num_samples),
@@ -307,6 +319,7 @@ def main(cfg: DictConfig) -> None:
       post_hull_sampler,
       in_axes=(0, 1, 0, 0, 0, None),
     )(jrnd.split(rng, post_tight_means.shape[0]), post_weight_samples, post_tight_means, post_tight_chols, post_tight, 50)
+    #post_hull_sampler(rng, post_weight_samples[:,0,...], post_tight_means[0], post_tight_chols[0], post_tight[0], 10)
     print('post_hull_wts', post_hull_wts.shape)
 
     # Look at a sample that has the same hull.
@@ -317,7 +330,7 @@ def main(cfg: DictConfig) -> None:
     anytight = jnp.any(post_tight, axis=2)
 
     # posterior index
-    idx = 1
+    idx = 0
 
     ############################################################################
     # Make a plot to look at.
