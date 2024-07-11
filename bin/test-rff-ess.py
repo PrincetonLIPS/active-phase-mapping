@@ -12,7 +12,7 @@ from omegaconf import DictConfig
 
 from apm.gp.mcmc import generate_slice_sampler
 from apm.gp.kernels import Matern52
-from apm.utils import multivariate_t_rvs
+from apm.utils import multivariate_t_rvs, entropy
 from apm.hull import lower_hull_points
 
 log = logging.getLogger()
@@ -22,7 +22,7 @@ def main(cfg: DictConfig) -> None:
 
   seed = 2
   rng = jrnd.PRNGKey(seed)
-  num_data = 3
+  num_data = 6
   num_phases = 2
   
   ##############################################################################
@@ -36,7 +36,7 @@ def main(cfg: DictConfig) -> None:
   data_y = jrnd.normal(data_y_rng, (num_data, num_phases))
 
   # num_candidates x num_species
-  grid_x = jnp.linspace(0.0, 5.0, 300)[:,jnp.newaxis]
+  grid_x = jnp.linspace(0.0, 5.0, 200)[:,jnp.newaxis]
 
   ##############################################################################
   # Initialize the hyperparameters.
@@ -80,6 +80,8 @@ def main(cfg: DictConfig) -> None:
 
   ##############################################################################
   # Iterate over each hyperparameter sample rather than vmapping to save memory.
+  no_hull_funcs = []
+  hull_funcs = []
   for ii in range(ls_samples.shape[0]):
     ls = ls_samples[ii]
     amp = amp_samples[ii]
@@ -182,6 +184,7 @@ def main(cfg: DictConfig) -> None:
     # Get the posterior functions themselves.
     # num_post x num_candidates x num_phases <--- ugly 
     post_func_samples = jnp.einsum('ijk,lik->jli', post_weight_samples, predict_basis)
+    no_hull_funcs.append(post_func_samples)
 
     ############################################################################
     # Compute the convex hull of the mins.
@@ -319,14 +322,10 @@ def main(cfg: DictConfig) -> None:
     post_hull_wts = jax.vmap(
       post_hull_sampler,
       in_axes=(0, 1, 0, 0, 0, None),
-    )(jrnd.split(rng, post_tight_means.shape[0]), post_weight_samples, post_tight_means, post_tight_chols, post_tight, 50)
-    #post_hull_sampler(rng, post_weight_samples[:,0,...], post_tight_means[0], post_tight_chols[0], post_tight[0], 10)
-    print('post_hull_wts', post_hull_wts.shape)
+    )(jrnd.split(rng, post_tight_means.shape[0]), post_weight_samples, post_tight_means, post_tight_chols, post_tight, cfg.chase.elliptical.num_samples) # FIXME
 
-    # Look at a sample that has the same hull.
-    print('predict_basis', predict_basis.shape)
     post_hull_funcs = jnp.einsum('ijkl,mkl->ijkm', post_hull_wts, predict_basis)
-    print('post_hull_funcs', post_hull_funcs.shape)
+    hull_funcs.append(post_hull_funcs)
 
     anytight = jnp.any(post_tight, axis=2)
 
@@ -336,8 +335,8 @@ def main(cfg: DictConfig) -> None:
     ############################################################################
     # Make a plot to look at.
     plt.figure(figsize=(10,10))
-    plt.plot(grid_x, post_func_samples[idx,:,0].T, color='blue', alpha=0.5)
-    plt.plot(grid_x, post_func_samples[idx,:,1].T, color='red', alpha=0.5)
+    plt.plot(grid_x, post_func_samples[:,:,0].T, color='green', alpha=0.1)
+    plt.plot(grid_x, post_func_samples[:,:,1].T, color='cyan', alpha=0.1)
     plt.plot(data_x, data_y, 'o')
 
     plt.plot(grid_x, post_hull_funcs[idx,:,0,:].T, color='blue', alpha=0.1)
@@ -348,6 +347,47 @@ def main(cfg: DictConfig) -> None:
              'kx',
     )
     plt.savefig("rff-ess-%d.png" % ii)
+
+  # num_hyper_samples x num_post x num_candidates x num_phases
+  no_hull_funcs = jnp.stack(no_hull_funcs).transpose(0, 1, 3, 2)
+  no_hull_funcs = no_hull_funcs.reshape(-1, num_phases, grid_x.shape[0])  
+
+  no_hull_entropies = jax.vmap(jax.vmap(
+      entropy,
+      in_axes=(1,),
+  ), in_axes=(1,),
+  )(no_hull_funcs)
+
+  # num_hyper_samples x num_post x num_ess x num_candidates x num_phases
+  hull_funcs = jnp.stack(hull_funcs)
+  hull_funcs = hull_funcs.reshape(-1, *hull_funcs.shape[2:])
+  
+  print('hull_funcs', hull_funcs.shape)
+  hull_entropies = jax.vmap( # hyper+posterior samples
+    jax.vmap( # candidates
+      jax.vmap( # phases
+        entropy,
+        in_axes=(1,),
+      ),
+      in_axes=(1,),
+    ),
+    in_axes=(0,),
+  )(hull_funcs)
+  print('hull_entropies', hull_entropies.shape)
+  mean_hull_entropies = jnp.mean(hull_entropies, axis=0)
+
+  plt.figure(figsize=(10,10))
+  plt.subplot(1,2,1)
+  plt.plot(grid_x, no_hull_entropies[0,:], color='blue', alpha=0.5)
+  plt.plot(grid_x, mean_hull_entropies[0,:], color='red', alpha=0.5)
+
+  plt.subplot(1,2,2)
+  plt.plot(grid_x, no_hull_entropies[1,:], color='blue', alpha=0.5)
+  plt.plot(grid_x, mean_hull_entropies[1,:], color='red', alpha=0.5)
+  
+  plt.savefig("rff-ess-entropies.png")
+  
+
 
 if __name__ == "__main__":
   main()
