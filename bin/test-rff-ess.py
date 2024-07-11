@@ -32,8 +32,11 @@ def main(cfg: DictConfig) -> None:
   # num_data x num_species
   data_x = jrnd.uniform(data_x_rng, (num_data, 1), minval=0.0, maxval=5.0)
 
-  # num_data x num_phases
-  data_y = jrnd.normal(data_y_rng, (num_data, num_phases))
+  # num_phases x num_data
+  data_y = jrnd.normal(data_y_rng, (num_phases, num_data))
+
+  # num_phases x num_data
+  data_noise = jnp.ones((num_phases, num_data)) * cfg.gp.jitter
 
   # num_candidates x num_species
   grid_x = jnp.linspace(0.0, 5.0, 200)[:,jnp.newaxis]
@@ -58,28 +61,44 @@ def main(cfg: DictConfig) -> None:
 
   ##############################################################################
   # Sample from the posterior on hyperparameters, for all phases.
-  slice_sampler = generate_slice_sampler(cfg)
+  slice_sampler = generate_slice_sampler(
+    Matern52, 
+    cfg.gp.lengthscale_prior,
+    cfg.gp.amplitude_prior,
+    cfg.chase.hypers.num_samples + cfg.chase.hypers.num_burnin,
+    cfg.chase.hypers.num_thin,
+  )
   hyper_rng, rng = jrnd.split(rng)
-  ls_samples, amp_samples = jax.vmap(slice_sampler, in_axes=(0,None,1,0,0,None,None))(
+  # VMAP over phases
+  #slice_sampler(hyper_rng, data_x, data_y[:,0], data_noise[:,0], init_ls[0], init_amp[0])
+  ls_samples, amp_samples = jax.vmap(slice_sampler, in_axes=(0, None, 0, 0, 0, 0))(
     jrnd.split(hyper_rng, num_phases),
     data_x,
     data_y,
+    data_noise,
     init_ls,
     init_amp,
-    cfg.chase.hypers.num_samples + cfg.chase.hypers.num_burnin,
-    cfg.chase.hypers.num_thin,  
   )
+  print('ls_samples', ls_samples.shape)
+  print('amp_samples', amp_samples.shape)
 
   # Eliminate burn-in samples and reshape.
 
-  # num_samples x num_phases x num_species
+  # num_phases x num_species
   ls_samples = ls_samples[:,cfg.chase.hypers.num_burnin:,:].transpose(1,0,2)
 
   # num_samples x num_phases
   amp_samples = amp_samples[:,cfg.chase.hypers.num_burnin:].transpose(1,0)
 
+  # ^^^^ can all be modularized away ^^^
+  # input: cfg, data_x, data_y, rng, init_ls, init_amp
+  # output: ls_samples, amp_samples
+  ##############################################################################
+
+
   ##############################################################################
   # Iterate over each hyperparameter sample rather than vmapping to save memory.
+  # Let's do this in a pmap if possible.
   no_hull_funcs = []
   hull_funcs = []
   for ii in range(ls_samples.shape[0]):
@@ -112,31 +131,40 @@ def main(cfg: DictConfig) -> None:
           jnp.dot(rff_projections, x/ls) + rff_phases
         )
       return amp * rff.squeeze()
+    
+    # ^^^^ module with kernel? ^^^^
+    # input: cfg, ls, amp
+    # output: a function that takes x and returns basis function values.
+    # will that be pmappable?
+    # is it better to go on and evaluate and just return the evaluated basis?
+    ############################################################################
 
-    # num_candidates x num_phases x num_rff
+    # num_phases x num_candidates x num_rff
     predict_basis = \
-      jax.vmap( # vmap over the grid
+      jax.vmap( # vmap over phases
         jax.vmap( # vmap over phases
           rff_basis_function,
-          in_axes=(None, 0, 0, 0, 0,)
+          in_axes=(0, None, None, None, None),
         ),
-        in_axes=(0, None, None, None, None),
+        in_axes=(None, 0, 0, 0, 0,),
       )(grid_x, rff_projections, rff_phases, ls, amp)
 
-    # num_data x num_phases x num_rff
+    # num_phases x num_data x num_rff
     train_basis = \
-       jax.vmap( # vmap over the grid
-        jax.vmap( # vmap over phases
+       jax.vmap( # vmap over phases
+        jax.vmap( # vmap over the grid
           rff_basis_function,
-          in_axes=(None, 0, 0, 0, 0,)
+          in_axes=(0, None, None, None, None),
         ),
-        in_axes=(0, None, None, None, None),
+        in_axes=(None, 0, 0, 0, 0,),
       )(data_x, rff_projections, rff_phases, ls, amp)
     
     ############################################################################
     # Compute the posterior on weights.
     def weight_posterior(basis, y, noise, prior_mean, prior_chol):
       noise = jnp.atleast_1d(noise)
+
+      # More robust to use SVD?
 
       prior_iSigma = jax.scipy.linalg.cho_solve((prior_chol, False), jnp.eye(cfg.gp.num_rff))
       iSigma = prior_iSigma + jnp.dot(basis.T, (1/noise[:,jnp.newaxis]) * basis)
@@ -158,12 +186,20 @@ def main(cfg: DictConfig) -> None:
       #return mu, jax.scipy.linalg.inv(chol_iSigma) # FIXME
       return mu, chol_Sigma
 
+    # ^^^^^^ modularize ^^^^^^^^
+    # This should be a general purpose thing.
+    ############################################################################
+
+
     # num_phases x num_rff
     # num_phases x num_rff x num_rff
+    print(train_basis.shape, data_y.shape)
     wt_post_means, wt_post_chols = jax.vmap( # over phases
       weight_posterior,
-      in_axes=(1, 1, None, None, None),
+      in_axes=(0, 0, None, None, None),
     )(train_basis, data_y, cfg.gp.jitter, jnp.zeros((cfg.gp.num_rff,)), jnp.eye(cfg.gp.num_rff))
+    print('wt_post_means', wt_post_means.shape)
+    print('wt_post_chols', wt_post_chols.shape)
 
     ############################################################################
     # Sample from the posterior on weights.
@@ -179,30 +215,50 @@ def main(cfg: DictConfig) -> None:
     )(wt_post_means, wt_post_chols, jrnd.split(post_weight_rng, (num_phases,)),
       cfg.chase.posterior.num_samples,
     )
+    print('post_weight_samples', post_weight_samples.shape)
 
     ############################################################################
     # Get the posterior functions themselves.
-    # num_post x num_candidates x num_phases <--- ugly 
-    post_func_samples = jnp.einsum('ijk,lik->jli', post_weight_samples, predict_basis)
+    # i = num_phase
+    # j = num_posterior
+    # k = num_rff
+    # l = num_candidates
+    post_func_samples = jnp.einsum('ijk,ilk->ijl', post_weight_samples, predict_basis)
     no_hull_funcs.append(post_func_samples)
+
+    ############################################################################
+    # Things from here are convex hull related.
+
+
+
 
     ############################################################################
     # Compute the convex hull of the mins.
     def convex_hull(X, Y):
-      min_Y = jnp.min(Y, axis=1)
+      min_Y = jnp.min(Y, axis=0)
       tight = lower_hull_points(X, min_Y)
-      return tight[:,jnp.newaxis] * (min_Y[:,jnp.newaxis] == Y)
+      return tight[jnp.newaxis,:] * (min_Y[jnp.newaxis,:] == Y)
 
-    # num_post x num_candidates x num_phases (boolean)    
+    # num_post x num_candidates x num_phases (boolean) 
+    print(grid_x.shape, post_func_samples.shape)
     post_tight = jax.vmap(
       convex_hull,
-      in_axes=(None,0),
+      in_axes=(None,1),
+      out_axes=1
     )(grid_x, post_func_samples)
+    print('post_tight', post_tight.shape)
 
     ############################################################################
     # Sample conditioned on the hull being the same.
     def hull_same_x(weights, target):
-      funcs = jnp.einsum('ik,lik->li', weights, predict_basis)
+      print('weights', weights.shape)
+      print('predict_basis', predict_basis.shape)
+      # i = phase
+      # j = rff
+      # k = candidate
+      funcs = jnp.einsum('ij,ikj->ik', weights, predict_basis)
+      print('funcs', funcs.shape)
+      print('grid_x', grid_x.shape)
       tight = convex_hull(grid_x, funcs)
       #jax.debug.print('off {}', jnp.argwhere(tight != target, size=2, fill_value=-1))
       #jax.debug.print('vals {}', funcs)
@@ -212,6 +268,8 @@ def main(cfg: DictConfig) -> None:
       bound_rng, nu_rng, rng = jrnd.split(rng, 3)
       init_upper = jrnd.uniform(bound_rng, minval=0, maxval=2*jnp.pi)
       init_lower = init_upper - 2*jnp.pi
+
+      print('target', target.shape)
 
       def _while_cond(state):
         rng, upper, lower, cur, nu, theta = state
@@ -272,23 +330,24 @@ def main(cfg: DictConfig) -> None:
       # All phases together
       tight_noise = jnp.where(tight, cfg.gp.jitter, cfg.gp.noise_missing)
 
-      print('tight', tight.shape, funcs.shape, tight_noise.shape, means.shape, chols.shape)
       # Treat the old params as the prior and these as "data".
+      #print(predict_basis.shape, funcs.shape, tight_noise.shape, means.shape, chols.shape)
       tight_means, tight_chols = jax.vmap( # over phases
           weight_posterior,
-          in_axes=(1, 1, 1, 0, 0),
+          in_axes=(0, 0, 0, 0, 0),
         )(predict_basis, funcs, tight_noise, means, chols)
       
       return tight_means, tight_chols
 
     # vmap over posterior samples to get distribution over weights that fixes
     # the tight points.
-    # num_post x num_phases x num_rff
-    # num_post x num_phases x num_rff x num_rff
+    #print(post_tight.shape, post_func_samples.shape, wt_post_means.shape, wt_post_chols.shape)
     post_tight_means, post_tight_chols = jax.vmap(
       tight_params,
-      in_axes=(0, 0, None, None),
+      in_axes=(1, 1, None, None),
+      out_axes=(1,1),
     )(post_tight, post_func_samples, wt_post_means, wt_post_chols)
+    print('post_tight_means', post_tight_means.shape)
 
     def post_hull_sampler(rng, init_wts, ess_means, ess_chols, tight, num_samples):
 
@@ -296,7 +355,8 @@ def main(cfg: DictConfig) -> None:
         rng, cur_wts = carry
 
         step_rng, rng = jrnd.split(rng)
-        new_wts = jax.vmap(ess_step, in_axes=(0, None, None, None, None, 0))(
+        print('tight', tight.shape)
+        new_wts = jax.vmap(ess_step, in_axes=(0, None, None, None, None, 0))( # over phases
           jrnd.split(step_rng, (num_phases,)), cur_wts, ess_means, ess_chols, tight,
           jnp.arange(num_phases))
         #new_wts = []
@@ -315,75 +375,94 @@ def main(cfg: DictConfig) -> None:
         jnp.arange(num_samples),
       )
 
-      return hull_wts
+      # Always keep phase as the first dimension.
+      return hull_wts.transpose(1,0,2)
 
     # vmap over posterior samples
-    # num_post x num_samples x num_phases x num_rff
+    print(post_weight_samples.shape, post_tight_means.shape, post_tight_chols.shape, post_tight.shape)
     post_hull_wts = jax.vmap(
       post_hull_sampler,
-      in_axes=(0, 1, 0, 0, 0, None),
-    )(jrnd.split(rng, post_tight_means.shape[0]), post_weight_samples, post_tight_means, post_tight_chols, post_tight, cfg.chase.elliptical.num_samples) # FIXME
+      in_axes=(0, 1, 1, 1, 1, None),
+      out_axes=2,
+    )(jrnd.split(rng, post_tight_means.shape[1]), 
+      post_weight_samples, 
+      post_tight_means, 
+      post_tight_chols,
+      post_tight,
+      cfg.chase.elliptical.num_samples) # FIXME (?)
 
-    post_hull_funcs = jnp.einsum('ijkl,mkl->ijkm', post_hull_wts, predict_basis)
+    print('post_hull_wts', post_hull_wts.shape)
+    print('predict_basis', predict_basis.shape)
+    # i = phase
+    # j = num_ess
+    # k = num_post
+    # l = rff
+    # m = candidate
+    post_hull_funcs = jnp.einsum('ijkl,iml->ijkm', post_hull_wts, predict_basis)
     hull_funcs.append(post_hull_funcs)
 
-    anytight = jnp.any(post_tight, axis=2)
+    anytight = jnp.any(post_tight, axis=0)
 
     # posterior index
     idx = 0
 
+    print('post_func_samples', post_func_samples.shape)
+    print('post_hull_funcs', post_hull_funcs.shape)
+
     ############################################################################
     # Make a plot to look at.
     plt.figure(figsize=(10,10))
-    plt.plot(grid_x, post_func_samples[:,:,0].T, color='green', alpha=0.1)
-    plt.plot(grid_x, post_func_samples[:,:,1].T, color='cyan', alpha=0.1)
-    plt.plot(data_x, data_y, 'o')
+    plt.plot(grid_x, post_func_samples[0,:,:].T, color='green', alpha=0.1)
+    plt.plot(grid_x, post_func_samples[1,:,:].T, color='cyan', alpha=0.1)
+    plt.plot(data_x, data_y.T, 'o')
 
-    plt.plot(grid_x, post_hull_funcs[idx,:,0,:].T, color='blue', alpha=0.1)
-    plt.plot(grid_x, post_hull_funcs[idx,:,1,:].T, color='red', alpha=0.1)
+    plt.plot(grid_x, post_hull_funcs[0,:,idx,:].T, color='blue', alpha=0.1)
+    plt.plot(grid_x, post_hull_funcs[1,:,idx,:].T, color='red', alpha=0.1)
 
     plt.plot(grid_x[anytight[idx]], 
-             jnp.min(post_func_samples[idx,:,:], axis=1)[anytight[idx]],
+             jnp.min(post_func_samples[:,idx,:], axis=0)[anytight[idx]],
              'kx',
     )
     plt.savefig("rff-ess-%d.png" % ii)
 
-  # num_hyper_samples x num_post x num_candidates x num_phases
-  no_hull_funcs = jnp.stack(no_hull_funcs).transpose(0, 1, 3, 2)
-  no_hull_funcs = no_hull_funcs.reshape(-1, num_phases, grid_x.shape[0])  
+  no_hull_funcs = jnp.stack(no_hull_funcs) .transpose(1, 3, 0, 2)
+  print('no_hull_funcs', no_hull_funcs.shape)
+  no_hull_funcs = no_hull_funcs.reshape(num_phases, grid_x.shape[0], -1)  
 
-  no_hull_entropies = jax.vmap(jax.vmap(
+  no_hull_entropies = jax.vmap(
+    jax.vmap( 
       entropy,
-      in_axes=(1,),
-  ), in_axes=(1,),
+      in_axes=(0,),
+  ), in_axes=(0,),
   )(no_hull_funcs)
 
-  # num_hyper_samples x num_post x num_ess x num_candidates x num_phases
-  hull_funcs = jnp.stack(hull_funcs)
-  hull_funcs = hull_funcs.reshape(-1, *hull_funcs.shape[2:])
-  
+  hull_funcs = jnp.stack(hull_funcs).transpose(1, 4, 0, 3, 2)
+  hull_funcs = hull_funcs.reshape(num_phases, grid_x.shape[0], -1, hull_funcs.shape[-1])
   print('hull_funcs', hull_funcs.shape)
-  hull_entropies = jax.vmap( # hyper+posterior samples
+
+  hull_entropies = jax.vmap( # phase
     jax.vmap( # candidates
-      jax.vmap( # phases
+      jax.vmap( # posterior+hyper samples
         entropy,
-        in_axes=(1,),
+        in_axes=(0,),
       ),
-      in_axes=(1,),
+      in_axes=(0,),
     ),
     in_axes=(0,),
   )(hull_funcs)
   print('hull_entropies', hull_entropies.shape)
-  mean_hull_entropies = jnp.mean(hull_entropies, axis=0)
+  mean_hull_entropies = jnp.mean(hull_entropies, axis=-1)
 
   plt.figure(figsize=(10,10))
   plt.subplot(1,2,1)
   plt.plot(grid_x, no_hull_entropies[0,:], color='blue', alpha=0.5)
   plt.plot(grid_x, mean_hull_entropies[0,:], color='red', alpha=0.5)
+  plt.plot(grid_x, no_hull_entropies[0,:] - mean_hull_entropies[0,:], color='black', alpha=0.5)
 
   plt.subplot(1,2,2)
   plt.plot(grid_x, no_hull_entropies[1,:], color='blue', alpha=0.5)
   plt.plot(grid_x, mean_hull_entropies[1,:], color='red', alpha=0.5)
+  plt.plot(grid_x, no_hull_entropies[1,:] - mean_hull_entropies[1,:], color='black', alpha=0.5)
   
   plt.savefig("rff-ess-entropies.png")
   
