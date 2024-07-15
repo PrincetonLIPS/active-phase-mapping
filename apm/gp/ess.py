@@ -12,7 +12,7 @@ import jax.random as jrnd
 import jax_dataclasses as jdc
 
 from ..hull import lower_hull_points
-from ..chase import weight_posterior_cholesky # refactor
+from .rff import weight_posterior_cholesky # refactor
 
 @jdc.pytree_dataclass
 class HullESSSamplerState:
