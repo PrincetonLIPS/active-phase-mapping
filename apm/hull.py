@@ -4,7 +4,6 @@ import numpy as np
 
 from scipy.spatial import ConvexHull
 
-
 def numpy_lower_hull_points(X, y):
   ''' Return boolean values about which points are tight. '''
 

@@ -4,6 +4,8 @@ import jax
 import jax.numpy as jnp
 
 from ...utils import sqdist
+  
+# make this also get spectral density samples?
 
 def Matern52(X: jax.Array, Y: Optional[jax.Array]=None) -> jax.Array:
   ''' Compute the Matern 5/2 kernel function between two sets of points, or
@@ -20,5 +22,7 @@ def Matern52(X: jax.Array, Y: Optional[jax.Array]=None) -> jax.Array:
   r2 = sqdist(X, Y)
   r = jnp.sqrt(r2)
   return (1.0 + jnp.sqrt(5.0) * r + 5.0 / 3.0 * r2) \
-    * jnp.exp(-jnp.sqrt(5.0) * r)
+     * jnp.exp(-jnp.sqrt(5.0) * r)
+
+
 

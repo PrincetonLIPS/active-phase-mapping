@@ -226,6 +226,9 @@ def main(cfg: DictConfig) -> None:
     post_func_samples = jnp.einsum('ijk,ilk->ijl', post_weight_samples, predict_basis)
     no_hull_funcs.append(post_func_samples)
 
+    # Can we abstract this all away to allow for RFF or other things?
+    # This is just sampling from the posterior predictive.
+
     ############################################################################
     # Things from here are convex hull related.
 
@@ -354,6 +357,8 @@ def main(cfg: DictConfig) -> None:
       def _ess_scan(carry, _):
         rng, cur_wts = carry
 
+        # FIXME: it occurs to me that this vmap over phases is probably not ok
+        # because the state is shared.
         step_rng, rng = jrnd.split(rng)
         print('tight', tight.shape)
         new_wts = jax.vmap(ess_step, in_axes=(0, None, None, None, None, 0))( # over phases

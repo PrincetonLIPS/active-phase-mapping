@@ -17,6 +17,8 @@ def stars_and_bars(n, k):
     jnp.ndarray, shape (C(n+k-1, k-1), k), where C(n, k) is the binomial coefficient.
       Each column represents the number of items in each bin.
   '''
+  if k == 1:
+    return jnp.ones((1,1)) * n
   bar_indices = jnp.sort(jnp.array(list(combinations(range(n+k-1), k-1))), axis=1)
   buckets = jnp.diff(bar_indices - jnp.arange(k-1), axis=1, prepend=0)
   return jnp.hstack([
@@ -75,3 +77,13 @@ def multivariate_t_rvs(rng, mu, sigma, df, shape):
   )
 
   return mu + Z * jnp.sqrt(df / chi2)[..., jnp.newaxis]
+
+def entropy(x):
+  # Fit a kernel density estimate.
+  kde = jax.scipy.stats.gaussian_kde(x)
+
+  # Use the samples to compute the entropy.
+  # TODO: fit a Gaussian and then do Gauss-Hermite quadrature.
+  return -jnp.mean(kde.logpdf(x))
+
+

@@ -186,12 +186,12 @@ def main(cfg: DictConfig) -> None:
     in_axes=(0, 0, 0, None),
     out_axes=1,
   )(wt_post_means, wt_post_chols, jrnd.split(rng, cfg.chase.hypers.num_samples), cfg.chase.posterior.num_samples)
-  print(weight_samples.shape, grid_basis.shape)
+  #print(weight_samples.shape, grid_basis.shape)
 
   ##############################################################################
   # Evaluate the posterior samples on the grid.
-  func_samples = jnp.einsum('ijk,lji->ljk', weight_samples, grid_basis)
   print(func_samples.shape)
+  func_samples = jnp.einsum('ijk,lji->ljk', weight_samples, grid_basis)
 
   ##############################################################################
   # Estimate entropy
@@ -200,7 +200,7 @@ def main(cfg: DictConfig) -> None:
     kernel = stats.gaussian_kde(values)
     return -jnp.mean(kernel.logpdf(values))
   entropies = jax.vmap(entropy)(func_samples.reshape(func_samples.shape[0],-1))
-  print(entropies.shape)
+  #print(entropies.shape)
 
 
   plt.figure(figsize=(5,10))

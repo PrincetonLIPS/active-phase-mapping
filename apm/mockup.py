@@ -23,6 +23,9 @@ class Mockup:
     self.jitter      = cfg.gp.jitter
     self.num_rff     = cfg.gp.num_rff
 
+    if self.num_species < 2:
+      raise ValueError("The number of species must be at least 2.")
+
     self.all_candidates = self._gen_candidates()
     self.energies       = self._gen_energies()
 
@@ -52,8 +55,8 @@ class Mockup:
       minval=self.amp_prior[0],
       maxval=self.amp_prior[1],
     )
-    log.info("Lengthscales: %s" % self.lengthscales)
-    log.info("Amplitudes: %s" % self.amplitudes)
+    log.info("Mockup lengthscales:\n%s" % self.lengthscales)
+    log.info("Mockup amplitudes:\n%s" % self.amplitudes)
 
     # Get the kernel function from the string in the config file.
     # kernel_fn = globals()[self.kernel]

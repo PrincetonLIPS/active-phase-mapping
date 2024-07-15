@@ -4,6 +4,7 @@ import jax.numpy as jnp
 import jax.random as jrnd
 import logging
 import matplotlib.pyplot as plt
+import subprocess
 
 #jax.config.update("jax_enable_x64", True)
 
@@ -17,6 +18,9 @@ log = logging.getLogger()
 @hydra.main(version_base=None, config_path="../conf", config_name="config")
 def main(cfg: DictConfig) -> None:
 
+  nvidia_smi = subprocess.run(["nvidia-smi"], stdout=subprocess.PIPE)
+  log.info(nvidia_smi.stdout.decode("utf-8"))
+
   print(cfg)
   mockup = Mockup(cfg)
 
@@ -24,11 +28,10 @@ def main(cfg: DictConfig) -> None:
   chase.corner_init()
   chase.select_next()
 
-
   # Plot the mockup function.
-  fig = plt.figure()
-  plt.plot(mockup.all_candidates[:,0], mockup.energies, "o")
-  plt.savefig("mockup.pdf")
+  # fig = plt.figure()
+  # plt.plot(mockup.all_candidates[:,0], mockup.energies, "o")
+  # plt.savefig("mockup.pdf")
 
 if __name__ == "__main__":
   main()

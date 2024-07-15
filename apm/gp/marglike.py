@@ -6,15 +6,12 @@ from functools import partial
 
 from .kernels import Matern52
 
-
 @partial(jax.jit, static_argnums=(4,5,6))
-def log_marginal_likelihood(
-    X, y,
+def log_marginal_likelihood_cholesky(
+    X, y, noise,
     lengthscales,
     amplitude,
     kernel_fn,
-    jitter,
-    noise_missing,      
   ):
   ''' Compute the log marginal likelihood for the GP for a single phase.
 
@@ -28,11 +25,10 @@ def log_marginal_likelihood(
   Args:
     X: The input data. [num_data x num_species]
     Y: The output data. [num_data] nan for missing values.
+    noise: The variance for each observed values.
     lengthscales: The length scales. [num_species]
     amplitudes: The amplitude.
     kernel_fn: The kernel function.
-    jitter: The jitter.
-    noise_missing: The noise for missing values.
 
   Returns:
     log_marginal_likelihood: The log marginal likelihood.
@@ -40,12 +36,7 @@ def log_marginal_likelihood(
   def apply_kernel(X1, X2, ls, amp):
     return amp**2 * kernel_fn(X1/ls, X2/ls)
 
-  # Zero out the missing values and make the noise for them big.
-  missing = jnp.isnan(y)
-  y = jnp.where(missing, jnp.zeros_like(y), y)
-  noise = jnp.where(missing, noise_missing, jitter)
-
-  # TODO: subtract off the mean, accounting for missing data.
+  # FIXME: subtract off mean here?
 
   # Compute the kernel matrix for the observed values.
   K_X_X = apply_kernel(X, X, lengthscales, amplitude) + jnp.diag(noise)

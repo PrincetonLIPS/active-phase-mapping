@@ -5,9 +5,10 @@ import jax_dataclasses as jdc
 
 from jax.lax import while_loop, scan
 
+from ..types import PRNGKey
 from .marglike import log_marginal_likelihood_cholesky
 
-PRNGKey = jax.Array
+
 @jdc.pytree_dataclass
 class SliceSamplerState:
   rng: PRNGKey
@@ -169,4 +170,4 @@ def generate_slice_sampler(
     return lengthscales, amplitudes
   ##############################################################################
   
-  return _slice_sample_hypers
+  return jax.jit(_slice_sample_hypers)
