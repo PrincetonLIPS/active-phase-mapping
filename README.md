@@ -1,6 +1,6 @@
 # active-phase-mapping
 
-Code for active phase mapping. Paper can be found here: https://arxiv.org/abs/2402.15582
+Code for active phase mapping. Paper can be found here: https://pubs.rsc.org/en/content/articlelanding/2024/mh/d4mh00432a 
 
 ## Setup notes
 
